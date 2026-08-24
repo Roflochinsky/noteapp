@@ -32,7 +32,12 @@ import androidx.compose.ui.unit.dp
 /** Онбординг-чеклист по компу: четыре шага + батарея, иллюстрация, «Продолжить». */
 @Composable
 fun OnboardingScreen(steps: List<OnboardStep>, onContinue: () -> Unit) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(26.dp, 20.dp)) {
+    Column(
+        Modifier.fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(26.dp, 20.dp)
+            .navigationBarsPadding()
+    ) {
         Text("Одна кнопка — и мысль уже в GitHub", style = MaterialTheme.typography.headlineSmall)
         Text(
             "Несколько шагов, и телефон пишет по долгому нажатию питания.",

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -23,7 +24,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -45,6 +45,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.roflochinsky.noteapp.pipeline.DoneNoteParser
@@ -132,7 +133,16 @@ fun DetailScreen(noteId: String, onBack: () -> Unit) {
                 Tab(
                     selected = tab == i,
                     onClick = { tab = i },
-                    text = { Text(t, color = if (tab == i) DocPalette.Blue else DocPalette.Mut) },
+                    text = {
+                        Text(
+                            t,
+                            color = if (tab == i) DocPalette.Blue else DocPalette.Mut,
+                            maxLines = 1,
+                            softWrap = false,
+                            style =
+                                MaterialTheme.typography.bodySmall.copy(color = Color.Unspecified),
+                        )
+                    },
                 )
             }
         }
@@ -143,7 +153,7 @@ fun DetailScreen(noteId: String, onBack: () -> Unit) {
                 else -> AudioTab(File(dir, NotesStore.AUDIO), marks)
             }
         }
-        Actions(donePath, transcript)
+        Actions(noteId, donePath, transcript, pushed = File(dir, NotesStore.PUSHED).exists())
     }
 }
 
@@ -162,7 +172,7 @@ private fun SummaryTab(done: DoneNoteParser.DoneNote?, state: String) {
                             style = MaterialTheme.typography.labelSmall,
                             modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
                         )
-                        val rest = line.substringAfter("**", "").substringAfter("** ").trim()
+                        val rest = line.removePrefix("**").substringAfter("**").trim()
                         if (rest.isNotEmpty())
                             Text(rest, style = MaterialTheme.typography.bodyMedium)
                     }
@@ -286,44 +296,55 @@ private fun AudioTab(audio: File, marks: List<Long>) {
 }
 
 @Composable
-private fun Actions(donePath: String?, transcript: String) {
+private fun Actions(noteId: String, donePath: String?, transcript: String, pushed: Boolean) {
     val context = LocalContext.current
     HorizontalDivider(color = DocPalette.Line)
     Row(
-        modifier = Modifier.fillMaxWidth().padding(22.dp, 12.dp, 22.dp, 22.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier =
+            Modifier.fillMaxWidth().padding(16.dp, 12.dp, 16.dp, 8.dp).navigationBarsPadding(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        OutlinedButton(
-            onClick = {
-                val repo = Settings.githubRepo(context)
-                val url =
-                    if (donePath != null) "https://github.com/$repo/blob/main/$donePath"
-                    else "https://github.com/$repo"
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-            },
-            modifier = Modifier.weight(1f),
-            shape = RoundedCornerShape(12.dp),
-        ) {
-            Text("Открыть в GitHub", color = DocPalette.Ink)
+        ActionButton("GitHub", Modifier.weight(1f)) {
+            val repo = Settings.githubRepo(context)
+            val url =
+                if (donePath != null) "https://github.com/$repo/blob/main/$donePath"
+                else "https://github.com/$repo"
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
         }
-        OutlinedButton(
-            onClick = {
-                context.startActivity(
-                    Intent.createChooser(
-                        Intent(Intent.ACTION_SEND)
-                            .setType("text/plain")
-                            .putExtra(Intent.EXTRA_TEXT, transcript),
-                        "Поделиться заметкой",
-                    )
+        ActionButton("Поделиться", Modifier.weight(1f)) {
+            context.startActivity(
+                Intent.createChooser(
+                    Intent(Intent.ACTION_SEND)
+                        .setType("text/plain")
+                        .putExtra(Intent.EXTRA_TEXT, transcript),
+                    "Поделиться заметкой",
                 )
-            },
-            modifier = Modifier.weight(1f),
-            shape = RoundedCornerShape(12.dp),
-        ) {
-            Icon(Icons.Filled.Share, null, tint = DocPalette.Ink, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("Поделиться", color = DocPalette.Ink)
+            )
         }
+        if (!pushed) {
+            ActionButton("Повторить", Modifier.weight(1f)) {
+                com.roflochinsky.noteapp.pipeline.PipelineQueue.enqueue(context, noteId)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActionButton(label: String, modifier: Modifier, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        contentPadding =
+            androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 10.dp),
+    ) {
+        Text(
+            label,
+            color = DocPalette.Ink,
+            maxLines = 1,
+            softWrap = false,
+            style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.Ink),
+        )
     }
 }
 

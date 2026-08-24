@@ -100,7 +100,13 @@ fun RecordSheet(onMark: () -> Unit, onStop: () -> Unit, onDismiss: () -> Unit) {
                     modifier = Modifier.weight(1f).height(52.dp),
                     shape = RoundedCornerShape(14.dp),
                 ) {
-                    Text("Отметить момент", color = DocPalette.Nav)
+                    Text(
+                        "Отметить момент",
+                        color = DocPalette.Nav,
+                        maxLines = 1,
+                        softWrap = false,
+                        style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.Nav),
+                    )
                 }
                 Button(
                     onClick = onStop,

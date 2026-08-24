@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -151,7 +152,8 @@ private fun NoteItem(note: NotesStore.Note, onClick: () -> Unit) {
 @Composable
 private fun RecordBar(isRecording: Boolean, onRecord: () -> Unit) {
     Column(
-        modifier = Modifier.fillMaxWidth().padding(22.dp, 12.dp, 22.dp, 24.dp),
+        modifier =
+            Modifier.fillMaxWidth().padding(22.dp, 12.dp, 22.dp, 8.dp).navigationBarsPadding(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Button(

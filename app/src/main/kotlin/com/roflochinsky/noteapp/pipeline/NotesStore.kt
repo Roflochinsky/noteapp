@@ -32,16 +32,39 @@ object NotesStore {
                     hasAudio = File(dir, AUDIO).exists(),
                     transcribed = md.exists(),
                     pushed = File(dir, PUSHED).exists(),
-                    durationSec =
-                        File(dir, DURATION)
-                            .takeIf { it.exists() }
-                            ?.readText()
-                            ?.trim()
-                            ?.toLongOrNull() ?: 0L,
+                    durationSec = durationSec(dir),
                     title = lines.firstOrNull()?.let(::stripCue)?.take(TITLE_MAX) ?: "",
                     preview = lines.take(2).joinToString("\n"),
                 )
             }
+
+    /** duration.txt, а для старых заметок — ленивая миграция из метаданных аудио. */
+    private fun durationSec(dir: File): Long {
+        val f = File(dir, DURATION)
+        val cached = f.takeIf { it.exists() }?.readText()?.trim()?.toLongOrNull()
+        val audio = File(dir, AUDIO)
+        return when {
+            cached != null -> cached
+            !audio.exists() -> 0
+            else -> {
+                val sec =
+                    runCatching {
+                            android.media.MediaMetadataRetriever().use { r ->
+                                r.setDataSource(audio.absolutePath)
+                                (r.extractMetadata(
+                                        android.media.MediaMetadataRetriever.METADATA_KEY_DURATION
+                                    )
+                                    ?.toLongOrNull() ?: 0L) / MS_IN_SEC
+                            }
+                        }
+                        .getOrDefault(0L)
+                if (sec > 0) runCatching { f.writeText(sec.toString()) }
+                sec
+            }
+        }
+    }
+
+    private const val MS_IN_SEC = 1000L
 
     /** "[00:12] Спикер 1: текст" → "текст" */
     private fun stripCue(line: String): String = line.substringAfter(": ", line)

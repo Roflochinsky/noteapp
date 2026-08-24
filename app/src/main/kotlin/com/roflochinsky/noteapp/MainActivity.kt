@@ -11,8 +11,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -59,8 +62,22 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+            .isAppearanceLightStatusBars = true
         if (!setupComplete()) screen = Screen.Onboarding
-        setContent { DocTheme { Surface(modifier = Modifier.fillMaxSize()) { Root() } } }
+        setContent {
+            DocTheme {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    androidx.compose.foundation.layout.Box(
+                        androidx.compose.foundation.layout.WindowInsets.statusBars.let {
+                            Modifier.windowInsetsPadding(it)
+                        }
+                    ) {
+                        Root()
+                    }
+                }
+            }
+        }
     }
 
     @androidx.compose.runtime.Composable
