@@ -50,6 +50,7 @@ class RecordingService : Service() {
                 if (toggleState.recording && startedAtMs > 0) {
                     val at = System.currentTimeMillis() - startedAtMs
                     marks += at
+                    marksSnapshot = marks.toList()
                     Log.i(Probe.LOG_TAG, "PROBE:MARK atMs=$at")
                 }
             }
@@ -100,7 +101,10 @@ class RecordingService : Service() {
             currentFile = file
             currentNoteId = stamp
             marks.clear()
+            marksSnapshot = emptyList()
             startedAtMs = System.currentTimeMillis()
+            startedAtWallMs = startedAtMs
+            pollAmplitude()
             Log.i(Probe.LOG_TAG, "PROBE:REC_START file=${file.absolutePath}")
         } catch (e: Exception) {
             Log.e(Probe.LOG_TAG, "PROBE:REC_FAIL ${e.javaClass.simpleName}: ${e.message}")
@@ -128,6 +132,8 @@ class RecordingService : Service() {
         val durMs = if (startedAtMs > 0) System.currentTimeMillis() - startedAtMs else 0
         Log.i(Probe.LOG_TAG, "PROBE:REC_STOP bytes=$bytes durMs=$durMs maxAmp=$maxAmp")
         currentNoteId?.let { id ->
+            File(NotesStore.noteDir(this, id), NotesStore.DURATION)
+                .writeText((durMs / MS_IN_SEC).toString())
             if (marks.isNotEmpty()) {
                 File(NotesStore.noteDir(this, id), NotesStore.MARKS)
                     .writeText(marks.joinToString("\n"))
@@ -143,8 +149,25 @@ class RecordingService : Service() {
         recorder = null
     }
 
+    private fun pollAmplitude() {
+        android.os
+            .Handler(mainLooper)
+            .postDelayed(
+                {
+                    if (toggleState.recording) {
+                        currentAmplitude =
+                            runCatching { recorder?.maxAmplitude ?: 0 }.getOrDefault(0)
+                        pollAmplitude()
+                    }
+                },
+                AMP_POLL_MS,
+            )
+    }
+
     private fun stopSelfSafely() {
         isRunning = false
+        currentAmplitude = 0
+        startedAtWallMs = 0
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -187,6 +210,21 @@ class RecordingService : Service() {
         private const val BIT_RATE = 96_000
         private const val CHANNEL_ID = "recording"
         private const val NOTIFICATION_ID = 1
+        private const val AMP_POLL_MS = 150L
+        private const val MS_IN_SEC = 1000L
+
+        /** Телеметрия для шторки записи (тот же процесс). */
+        @Volatile
+        var currentAmplitude = 0
+            private set
+
+        @Volatile
+        var startedAtWallMs = 0L
+            private set
+
+        @Volatile
+        var marksSnapshot: List<Long> = emptyList()
+            private set
 
         /** Читается экраном статуса; точность best-effort, для зонда достаточно. */
         @Volatile

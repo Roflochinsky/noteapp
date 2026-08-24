@@ -2,109 +2,136 @@ package com.roflochinsky.noteapp
 
 import android.Manifest
 import android.app.role.RoleManager
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings as SysSettings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import com.roflochinsky.noteapp.pipeline.NotesStore
-import com.roflochinsky.noteapp.pipeline.PipelineQueue
 import com.roflochinsky.noteapp.pipeline.Settings
+import com.roflochinsky.noteapp.ui.DetailScreen
+import com.roflochinsky.noteapp.ui.DocTheme
+import com.roflochinsky.noteapp.ui.FeedScreen
+import com.roflochinsky.noteapp.ui.OnboardStep
+import com.roflochinsky.noteapp.ui.OnboardingScreen
+import com.roflochinsky.noteapp.ui.RecordSheet
+import kotlinx.coroutines.delay
 
-/** Служебный экран (дизайн-лента придёт срезом С5): статус, заметки, ключ Deepgram. */
 class MainActivity : ComponentActivity() {
 
-    private var statusText by mutableStateOf("")
+    private sealed interface Screen {
+        data object Onboarding : Screen
+
+        data object Feed : Screen
+
+        data class Detail(val noteId: String) : Screen
+    }
+
+    private var screen by mutableStateOf<Screen>(Screen.Feed)
     private var notes by mutableStateOf(listOf<NotesStore.Note>())
-    private var keyDialog by mutableStateOf(false)
-    private var keyInput by mutableStateOf("")
+    private var recording by mutableStateOf(false)
+    private var sheetOpen by mutableStateOf(false)
+    private var dialog by mutableStateOf<String?>(null) // "deepgram" | "github"
+    private var input by mutableStateOf("")
+    private var permTick by mutableIntStateOf(0)
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-            refresh()
+            permTick++
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent {
-            MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    Column(
-                        modifier = Modifier.padding(20.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Text("MyNoteBook", style = MaterialTheme.typography.headlineSmall)
-                        Text(statusText, style = MaterialTheme.typography.bodySmall)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { requestPermissions() }) { Text("Разрешения") }
-                            Button(
-                                onClick = {
-                                    startForegroundService(
-                                        RecordingService.toggleIntent(this@MainActivity)
-                                    )
-                                }
-                            ) {
-                                Text("Toggle")
-                            }
-                            Button(
-                                onClick = {
-                                    keyInput = Settings.deepgramKey(this@MainActivity).orEmpty()
-                                    keyDialog = true
-                                }
-                            ) {
-                                Text("Ключ STT")
-                            }
-                        }
-                        HorizontalDivider()
-                        // ponytail: пока есть нерасшифрованные — перечитываем каждые 2с;
-                        // нормальная подписка на WorkManager придёт с лентой С5.
-                        LaunchedEffect(notes.any { !it.pushed }) {
-                            while (notes.any { !it.pushed }) {
-                                kotlinx.coroutines.delay(POLL_MS)
-                                refresh()
-                            }
-                        }
-                        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            items(notes, key = { it.id }) { note -> NoteRow(note) }
-                        }
-                    }
-                    if (keyDialog) KeyDialog()
-                }
-            }
-        }
+        if (!setupComplete()) screen = Screen.Onboarding
+        setContent { DocTheme { Surface(modifier = Modifier.fillMaxSize()) { Root() } } }
     }
 
     @androidx.compose.runtime.Composable
-    private fun KeyDialog() {
+    private fun Root() {
+        LaunchedEffect(Unit) {
+            while (true) {
+                notes = NotesStore.list(this@MainActivity)
+                val was = recording
+                recording = RecordingService.isRunning
+                if (recording && !was) sheetOpen = true
+                if (!recording) sheetOpen = false
+                delay(POLL_MS)
+            }
+        }
+        when (val s = screen) {
+            is Screen.Onboarding -> OnboardingScreen(steps = steps()) { screen = Screen.Feed }
+            is Screen.Feed ->
+                FeedScreen(
+                    notes = notes,
+                    isRecording = recording,
+                    onNote = { screen = Screen.Detail(it) },
+                    onRecord = {
+                        if (recording) {
+                            sheetOpen = true
+                        } else {
+                            startForegroundService(RecordingService.toggleIntent(this@MainActivity))
+                        }
+                    },
+                    onSettings = { screen = Screen.Onboarding },
+                )
+            is Screen.Detail -> {
+                BackHandler { screen = Screen.Feed }
+                DetailScreen(noteId = s.noteId, onBack = { screen = Screen.Feed })
+            }
+        }
+        if (screen is Screen.Onboarding && setupComplete()) {
+            BackHandler { screen = Screen.Feed }
+        }
+        if (sheetOpen && recording) {
+            RecordSheet(
+                onMark = { sendAction(RecordingService.ACTION_MARK) },
+                onStop = {
+                    sendAction(RecordingService.ACTION_STOP)
+                    sheetOpen = false
+                },
+                onDismiss = { sheetOpen = false },
+            )
+        }
+        when (dialog) {
+            "deepgram" ->
+                InputDialog("Ключ Deepgram") { Settings.setDeepgramKey(this@MainActivity, it) }
+            "github" ->
+                InputDialog("GitHub-токен (репо заметок)") {
+                    Settings.setGithubToken(this@MainActivity, it)
+                }
+        }
+    }
+
+    private fun sendAction(action: String) {
+        startForegroundService(Intent(this, RecordingService::class.java).setAction(action))
+    }
+
+    @androidx.compose.runtime.Composable
+    private fun InputDialog(title: String, onSave: (String) -> Unit) {
         AlertDialog(
-            onDismissRequest = { keyDialog = false },
-            title = { Text("Ключ Deepgram") },
+            onDismissRequest = { dialog = null },
+            title = { Text(title) },
             text = {
                 OutlinedTextField(
-                    value = keyInput,
-                    onValueChange = { keyInput = it },
+                    value = input,
+                    onValueChange = { input = it },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -112,74 +139,89 @@ class MainActivity : ComponentActivity() {
             confirmButton = {
                 TextButton(
                     onClick = {
-                        Settings.setDeepgramKey(this@MainActivity, keyInput)
-                        keyDialog = false
-                        refresh()
+                        onSave(input)
+                        dialog = null
+                        permTick++
                     }
                 ) {
                     Text("Сохранить")
                 }
             },
-            dismissButton = { TextButton(onClick = { keyDialog = false }) { Text("Отмена") } },
+            dismissButton = { TextButton(onClick = { dialog = null }) { Text("Отмена") } },
         )
     }
 
-    @androidx.compose.runtime.Composable
-    private fun NoteRow(note: NotesStore.Note) {
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(
-                    note.id + if (note.pushed) " · в GitHub" else "",
-                    style = MaterialTheme.typography.titleSmall,
+    private fun steps(): List<OnboardStep> {
+        permTick // перечитывать при изменениях
+        val role =
+            getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT)
+                ?: false
+        val mic =
+            checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
+        val notif =
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+                PackageManager.PERMISSION_GRANTED
+        val battery =
+            getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(packageName)
+                ?: false
+        return listOf(
+            OnboardStep("Назначить ассистентом", "вместо Gemini по кнопке питания", role) {
+                startActivity(Intent(SysSettings.ACTION_VOICE_INPUT_SETTINGS))
+            },
+            OnboardStep("Микрофон и уведомления", "разрешения записи", mic && notif) {
+                permissionLauncher.launch(
+                    arrayOf(
+                        Manifest.permission.RECORD_AUDIO,
+                        Manifest.permission.POST_NOTIFICATIONS,
+                    )
                 )
-                if (!note.pushed) {
-                    TextButton(onClick = { PipelineQueue.enqueue(this@MainActivity, note.id) }) {
-                        Text("Повторить")
-                    }
-                }
-            }
-            Text(
-                when {
-                    note.transcribed -> note.preview
-                    else -> "в очереди — расшифровка"
-                },
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
+            },
+            OnboardStep(
+                "Подключить GitHub",
+                "токен приватного репозитория заметок",
+                Settings.githubToken(this) != null,
+            ) {
+                input = Settings.githubToken(this).orEmpty()
+                dialog = "github"
+            },
+            OnboardStep(
+                "Ключ Deepgram",
+                "расшифровка и спикеры",
+                Settings.deepgramKey(this) != null,
+            ) {
+                input = Settings.deepgramKey(this).orEmpty()
+                dialog = "deepgram"
+            },
+            OnboardStep(
+                "Батарея без ограничений",
+                "чтобы длинная запись не умирала в фоне",
+                battery,
+            ) {
+                startActivity(Intent(SysSettings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            },
+        )
+    }
+
+    private fun setupComplete(): Boolean {
+        val role =
+            getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT)
+                ?: false
+        val mic =
+            checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
+        return role &&
+            mic &&
+            Settings.deepgramKey(this) != null &&
+            Settings.githubToken(this) != null
     }
 
     override fun onResume() {
         super.onResume()
-        refresh()
-    }
-
-    private fun requestPermissions() {
-        permissionLauncher.launch(
-            arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS)
-        )
+        permTick++
     }
 
     private companion object {
-        const val POLL_MS = 2000L
-    }
-
-    private fun refresh() {
-        val role = getSystemService(RoleManager::class.java)
-        val roleHeld = role?.isRoleHeld(RoleManager.ROLE_ASSISTANT) ?: false
-        val micGranted =
-            checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
-                PackageManager.PERMISSION_GRANTED
-        val hasKey = Settings.deepgramKey(this) != null
-        val hasGh = Settings.githubToken(this) != null
-        statusText =
-            "роль: ${if (roleHeld) "наша" else "НЕ наша"} · мик: " +
-                "${if (micGranted) "да" else "НЕТ"} · запись: " +
-                "${if (RecordingService.isRunning) "идёт" else "нет"} · ключ STT: " +
-                "${if (hasKey) "есть" else "НЕТ"} · GitHub: " +
-                if (hasGh) "есть" else "НЕТ"
-        notes = NotesStore.list(this)
+        const val POLL_MS = 1000L
     }
 }

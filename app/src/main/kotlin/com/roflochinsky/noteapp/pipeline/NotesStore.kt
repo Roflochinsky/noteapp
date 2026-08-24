@@ -13,6 +13,7 @@ object NotesStore {
     const val TRANSCRIPT_MD = "transcript.md"
     const val MARKS = "marks.txt"
     const val PUSHED = "pushed.txt"
+    const val DURATION = "duration.txt"
 
     fun root(context: Context): File = File(context.filesDir, "notes").apply { mkdirs() }
 
@@ -25,22 +26,35 @@ object NotesStore {
             .sortedByDescending { it.name }
             .map { dir ->
                 val md = File(dir, TRANSCRIPT_MD)
+                val lines = if (md.exists()) md.readLines() else emptyList()
                 Note(
                     id = dir.name,
                     hasAudio = File(dir, AUDIO).exists(),
                     transcribed = md.exists(),
                     pushed = File(dir, PUSHED).exists(),
-                    preview =
-                        if (md.exists()) md.readText().lineSequence().take(2).joinToString("\n")
-                        else "",
+                    durationSec =
+                        File(dir, DURATION)
+                            .takeIf { it.exists() }
+                            ?.readText()
+                            ?.trim()
+                            ?.toLongOrNull() ?: 0L,
+                    title = lines.firstOrNull()?.let(::stripCue)?.take(TITLE_MAX) ?: "",
+                    preview = lines.take(2).joinToString("\n"),
                 )
             }
+
+    /** "[00:12] Спикер 1: текст" → "текст" */
+    private fun stripCue(line: String): String = line.substringAfter(": ", line)
+
+    private const val TITLE_MAX = 48
 
     data class Note(
         val id: String,
         val hasAudio: Boolean,
         val transcribed: Boolean,
         val pushed: Boolean,
-        val preview: String,
+        val durationSec: Long = 0,
+        val title: String = "",
+        val preview: String = "",
     )
 }

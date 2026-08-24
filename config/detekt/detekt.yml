@@ -1,8 +1,18 @@
-# Поверх дефолтного конфига (buildUponDefaultConfig=true в app/build.gradle.kts).
+# Поверх дефолтного конфига (buildUponDefaultConfig=true). Compose-специфика: композаблы
+# декларативно длинные, палитра — именованные константы-свойства.
 naming:
   FunctionNaming:
-    # Compose-функции по конвенции PascalCase.
+    ignoreAnnotated: ['Composable']
+complexity:
+  LongMethod:
+    ignoreAnnotated: ['Composable']
+  CyclomaticComplexMethod:
+    ignoreAnnotated: ['Composable']
+  LongParameterList:
     ignoreAnnotated: ['Composable']
 style:
   MagicNumber:
     ignoreAnnotated: ['Composable']
+    ignorePropertyDeclaration: true
+  ReturnCount:
+    excludeGuardClauses: true
