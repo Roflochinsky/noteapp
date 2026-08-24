@@ -24,6 +24,7 @@ class ToggleSession(context: Context) : VoiceInteractionSession(context) {
         super.onShow(args, showFlags)
         val invocationType = args?.getInt(KEY_INVOCATION_TYPE, -1) ?: -1
         val sessionId = args?.getInt(KEY_SHOW_SESSION_ID, -1) ?: -1
+        // KEY_SHOW_SESSION_ID — платформенная константа (API 29+), не угаданная строка.
         val screenOn = context.getSystemService(PowerManager::class.java)?.isInteractive ?: false
         val keyguard =
             context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked ?: false
@@ -45,6 +46,6 @@ class ToggleSession(context: Context) : VoiceInteractionSession(context) {
 
     private companion object {
         const val KEY_INVOCATION_TYPE = "invocation_type"
-        const val KEY_SHOW_SESSION_ID = "android.service.voice.SHOW_SESSION_ID"
+        const val KEY_SHOW_SESSION_ID = VoiceInteractionSession.KEY_SHOW_SESSION_ID
     }
 }
