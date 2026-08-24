@@ -1,0 +1,8 @@
+# Поверх дефолтного конфига (buildUponDefaultConfig=true в app/build.gradle.kts).
+naming:
+  FunctionNaming:
+    # Compose-функции по конвенции PascalCase.
+    ignoreAnnotated: ['Composable']
+style:
+  MagicNumber:
+    ignoreAnnotated: ['Composable']

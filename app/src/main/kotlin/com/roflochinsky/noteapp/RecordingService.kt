@@ -10,6 +10,8 @@ import android.content.Intent
 import android.media.MediaRecorder
 import android.os.IBinder
 import android.util.Log
+import com.roflochinsky.noteapp.pipeline.NotesStore
+import com.roflochinsky.noteapp.pipeline.TranscribeWorker
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -24,7 +26,9 @@ class RecordingService : Service() {
     private val toggleState = ToggleState()
     private var recorder: MediaRecorder? = null
     private var currentFile: File? = null
+    private var currentNoteId: String? = null
     private var startedAtMs = 0L
+    private val marks = mutableListOf<Long>()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -42,6 +46,13 @@ class RecordingService : Service() {
                     }
                     ToggleDecision.NOOP -> Log.i(Probe.LOG_TAG, "PROBE:TOGGLE decision=dup")
                 }
+            ACTION_MARK -> {
+                if (toggleState.recording && startedAtMs > 0) {
+                    val at = System.currentTimeMillis() - startedAtMs
+                    marks += at
+                    Log.i(Probe.LOG_TAG, "PROBE:MARK atMs=$at")
+                }
+            }
             ACTION_STOP ->
                 when (toggleState.stop()) {
                     ToggleDecision.STOP -> {
@@ -73,19 +84,22 @@ class RecordingService : Service() {
             startForeground(NOTIFICATION_ID, buildNotification())
             Log.i(Probe.LOG_TAG, "PROBE:FGS_STARTED")
             isRunning = true
-            val dir = File(filesDir, PROBE_DIR).apply { mkdirs() }
             val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
-            val file = File(dir, "$stamp.m4a")
+            val file = File(NotesStore.noteDir(this, stamp), NotesStore.AUDIO)
             recorder =
                 MediaRecorder(this).apply {
                     setAudioSource(MediaRecorder.AudioSource.MIC)
                     setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                     setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                    setAudioSamplingRate(SAMPLE_RATE_HZ)
+                    setAudioEncodingBitRate(BIT_RATE)
                     setOutputFile(file.absolutePath)
                     prepare()
                     start()
                 }
             currentFile = file
+            currentNoteId = stamp
+            marks.clear()
             startedAtMs = System.currentTimeMillis()
             Log.i(Probe.LOG_TAG, "PROBE:REC_START file=${file.absolutePath}")
         } catch (e: Exception) {
@@ -113,6 +127,14 @@ class RecordingService : Service() {
         val bytes = currentFile?.length() ?: 0
         val durMs = if (startedAtMs > 0) System.currentTimeMillis() - startedAtMs else 0
         Log.i(Probe.LOG_TAG, "PROBE:REC_STOP bytes=$bytes durMs=$durMs maxAmp=$maxAmp")
+        currentNoteId?.let { id ->
+            if (marks.isNotEmpty()) {
+                File(NotesStore.noteDir(this, id), NotesStore.MARKS)
+                    .writeText(marks.joinToString("\n"))
+            }
+            if (bytes > 0) TranscribeWorker.enqueue(this, id)
+        }
+        currentNoteId = null
         stopSelfSafely()
     }
 
@@ -132,6 +154,13 @@ class RecordingService : Service() {
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL_ID, "Запись", NotificationManager.IMPORTANCE_LOW)
         )
+        val markIntent =
+            PendingIntent.getService(
+                this,
+                1,
+                Intent(this, RecordingService::class.java).setAction(ACTION_MARK),
+                PendingIntent.FLAG_IMMUTABLE,
+            )
         val stopIntent =
             PendingIntent.getService(
                 this,
@@ -144,6 +173,7 @@ class RecordingService : Service() {
             .setContentTitle("Идёт запись")
             .setUsesChronometer(true)
             .setOngoing(true)
+            .addAction(Notification.Action.Builder(null, "Момент", markIntent).build())
             .addAction(Notification.Action.Builder(null, "Стоп", stopIntent).build())
             .build()
     }
@@ -151,7 +181,10 @@ class RecordingService : Service() {
     companion object {
         const val ACTION_TOGGLE = "com.roflochinsky.noteapp.TOGGLE"
         const val ACTION_STOP = "com.roflochinsky.noteapp.STOP"
+        const val ACTION_MARK = "com.roflochinsky.noteapp.MARK"
         const val PROBE_DIR = "probe"
+        private const val SAMPLE_RATE_HZ = 44_100
+        private const val BIT_RATE = 96_000
         private const val CHANNEL_ID = "recording"
         private const val NOTIFICATION_ID = 1
 
