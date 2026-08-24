@@ -10,11 +10,8 @@ repos:
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
       - id: check-merge-conflict
-  - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
-    rev: v2.15.0
-    hooks:
-      - id: pretty-format-kotlin
-        args: [--autofix, --ktfmt, --ktfmt-style=kotlinlang]
+  # Kotlin-формат намеренно НЕ здесь: единственный форматтер — Gradle ktfmtCheck (гейт из
+  # CLAUDE.md). Двойник в pre-commit — это война версий из прецедента workwatch.
   - repo: https://github.com/rhysd/actionlint
     rev: v1.7.7
     hooks:
