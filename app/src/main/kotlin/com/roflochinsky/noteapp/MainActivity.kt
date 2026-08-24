@@ -23,6 +23,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -77,6 +78,14 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                         HorizontalDivider()
+                        // ponytail: пока есть нерасшифрованные — перечитываем каждые 2с;
+                        // нормальная подписка на WorkManager придёт с лентой С5.
+                        LaunchedEffect(notes.any { !it.transcribed }) {
+                            while (notes.any { !it.transcribed }) {
+                                kotlinx.coroutines.delay(POLL_MS)
+                                refresh()
+                            }
+                        }
                         LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             items(notes, key = { it.id }) { note -> NoteRow(note) }
                         }
@@ -145,6 +154,10 @@ class MainActivity : ComponentActivity() {
         permissionLauncher.launch(
             arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS)
         )
+    }
+
+    private companion object {
+        const val POLL_MS = 2000L
     }
 
     private fun refresh() {
