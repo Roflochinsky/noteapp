@@ -1,0 +1,14 @@
+# Android / Gradle (появится с первым модулем)
+.gradle/
+build/
+local.properties
+*.apk
+*.aab
+
+# Python (хуки)
+__pycache__/
+*.pyc
+
+# Секреты
+.env
+*.keystore

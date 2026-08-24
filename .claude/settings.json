@@ -1,0 +1,36 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/destructive-fs-guard.py\"",
+            "timeout": 10,
+            "statusMessage": "Страж катастрофических файловых операций…"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/reminders.py\"",
+            "timeout": 10,
+            "statusMessage": "Проверка напоминаний…"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/skill-router.py\"",
+            "timeout": 10,
+            "statusMessage": "Маршрутизация скиллов…"
+          }
+        ]
+      }
+    ]
+  }
+}

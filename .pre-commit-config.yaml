@@ -1,0 +1,21 @@
+# Гигиена + формат Kotlin + линт workflow. Версии инструментов, у которых есть двойник в
+# Gradle/CI, пинить синхронно с ним (прецедент workwatch: ruff v0.8.6 в хуке против 0.15.12
+# в CI — коммит воюет с пайплайном).
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: check-merge-conflict
+  - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
+    rev: v2.15.0
+    hooks:
+      - id: pretty-format-kotlin
+        args: [--autofix, --ktfmt, --ktfmt-style=kotlinlang]
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.7
+    hooks:
+      - id: actionlint
