@@ -131,7 +131,10 @@ class MainActivity : ComponentActivity() {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text(note.id, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    note.id + if (note.pushed) " · в GitHub" else "",
+                    style = MaterialTheme.typography.titleSmall,
+                )
                 if (!note.transcribed) {
                     TextButton(onClick = { TranscribeWorker.enqueue(this@MainActivity, note.id) }) {
                         Text("Расшифровать")
@@ -167,11 +170,13 @@ class MainActivity : ComponentActivity() {
             checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
                 PackageManager.PERMISSION_GRANTED
         val hasKey = Settings.deepgramKey(this) != null
+        val hasGh = Settings.githubToken(this) != null
         statusText =
             "роль: ${if (roleHeld) "наша" else "НЕ наша"} · мик: " +
                 "${if (micGranted) "да" else "НЕТ"} · запись: " +
                 "${if (RecordingService.isRunning) "идёт" else "нет"} · ключ STT: " +
-                if (hasKey) "есть" else "НЕТ"
+                "${if (hasKey) "есть" else "НЕТ"} · GitHub: " +
+                if (hasGh) "есть" else "НЕТ"
         notes = NotesStore.list(this)
     }
 }

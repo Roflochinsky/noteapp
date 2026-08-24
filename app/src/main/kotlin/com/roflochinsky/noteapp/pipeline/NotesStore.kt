@@ -12,6 +12,7 @@ object NotesStore {
     const val TRANSCRIPT_JSON = "transcript.json"
     const val TRANSCRIPT_MD = "transcript.md"
     const val MARKS = "marks.txt"
+    const val PUSHED = "pushed.txt"
 
     fun root(context: Context): File = File(context.filesDir, "notes").apply { mkdirs() }
 
@@ -28,6 +29,7 @@ object NotesStore {
                     id = dir.name,
                     hasAudio = File(dir, AUDIO).exists(),
                     transcribed = md.exists(),
+                    pushed = File(dir, PUSHED).exists(),
                     preview =
                         if (md.exists()) md.readText().lineSequence().take(2).joinToString("\n")
                         else "",
@@ -38,6 +40,7 @@ object NotesStore {
         val id: String,
         val hasAudio: Boolean,
         val transcribed: Boolean,
+        val pushed: Boolean,
         val preview: String,
     )
 }

@@ -37,6 +37,7 @@ class TranscribeWorker(context: Context, params: WorkerParameters) :
                 val md = TranscriptMapper.toMarkdown(TranscriptMapper.fromDeepgramJson(json))
                 File(dir, NotesStore.TRANSCRIPT_MD).writeText(md)
                 Log.i(Probe.LOG_TAG, "PROBE:STT_OK note=$noteId chars=${md.length}")
+                PushWorker.enqueue(applicationContext, noteId)
                 Result.success()
             } catch (e: IOException) {
                 Log.w(Probe.LOG_TAG, "PROBE:STT_RETRY note=$noteId ${e.message?.take(ERR_PREVIEW)}")
