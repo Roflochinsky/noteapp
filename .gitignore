@@ -12,3 +12,4 @@ __pycache__/
 # Секреты
 .env
 *.keystore
+.kotlin/
