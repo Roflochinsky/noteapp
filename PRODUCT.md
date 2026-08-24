@@ -31,7 +31,7 @@ Kotlin + Jetpack Compose (решено в wayfinder-карте nikitatrubaev-pdj
 - Аудио живёт только на телефоне; в git не пушится.
 - Терминология — глоссарий в CONTEXT.md (Запись, Заметка, Кнопка, Пайплайн, Очередь…).
 - Настройки: назначение ассистентом, разрешения, GitHub-токен и репо, ключ Deepgram.
-- Не решено: имя приложения (рабочее — noteapp).
+- Имя приложения: MyNoteBook (решено 2026-08-24); пакет com.roflochinsky.noteapp, репо noteapp.
 
 ## Brand Commitments
 
