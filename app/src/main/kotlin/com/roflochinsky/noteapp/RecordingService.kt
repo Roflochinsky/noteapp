@@ -55,13 +55,24 @@ class RecordingService : Service() {
         return START_NOT_STICKY
     }
 
-    @Suppress("TooGenericExceptionCaught") // MediaRecorder кидает Runtime/IllegalState — зонд
-    // обязан пережить любой отказ и записать причину (вердикт LLD-3).
+    @Suppress("TooGenericExceptionCaught") // startForeground(microphone) и MediaRecorder кидают
+    // Security/Runtime/IllegalState — зонд обязан пережить любой отказ и записать причину
+    // (вердикт LLD-3). Без RECORD_AUDIO сам startForeground(type=microphone) бросает
+    // SecurityException — проверяем разрешение ДО него (находка прогона P6, 2026-08-24).
     private fun startRecording() {
-        startForeground(NOTIFICATION_ID, buildNotification())
-        Log.i(Probe.LOG_TAG, "PROBE:FGS_STARTED")
-        isRunning = true
+        if (
+            checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.e(Probe.LOG_TAG, "PROBE:REC_FAIL no_permission RECORD_AUDIO")
+            toggleState.stop()
+            stopSelf()
+            return
+        }
         try {
+            startForeground(NOTIFICATION_ID, buildNotification())
+            Log.i(Probe.LOG_TAG, "PROBE:FGS_STARTED")
+            isRunning = true
             val dir = File(filesDir, PROBE_DIR).apply { mkdirs() }
             val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
             val file = File(dir, "$stamp.m4a")
