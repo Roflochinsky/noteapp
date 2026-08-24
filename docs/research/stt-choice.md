@@ -224,3 +224,24 @@ Content-Type: audio/m4a   # или тот формат, что пишет тел
 34. Speechmatics — Regions: https://docs.speechmatics.com/administration/regions
 35. Deepgram — Information Security & Privacy Statement: https://developers.deepgram.com/trust-security/information-security-privacy
 36. AssemblyAI — Data Controls: https://www.assemblyai.com/docs/data-controls
+
+---
+
+## Смоук-тест на реальных записях (2026-08-24, тикет nikitatrubaev-pdj.7)
+
+Прогон nova-3 на записях с OnePlus 13 (8 кГц mono m4a, живой API, ключ владельца).
+
+- **API работает**: HTTP 200, 1–2с на 15с аудио. utterances[] несут speaker/start/end/transcript,
+  words[] — speaker/start. Формат готов для сборки .md напрямую.
+- **language=multi ЛУЧШЕ language=ru на русском с англицизмами** — выбор для v1:
+  - multi: «pipeline упал на билде… смёржить main. Deadline пятница» (поймал техслова).
+  - ru: потерял «билде», «смёржить»; «Дедлайн пятницы». Уверенность multi 0.899 > ru 0.887.
+- **Диаризация НЕ разделила имитированный второй голос** (оба куска speaker=0). Причина: один
+  физический человек + низкое качество 8 кГц. Поле speaker структурно присутствует. Открыто:
+  проверить на записи ДВУХ реальных людей и на повышенном sample rate. Риск для сценария
+  «разговор двоих» — средний; фолбэк AssemblyAI (у него диаризация заявлена сильнее) остаётся.
+- **Качество транскрипта среднее** («тесты»→«течь», «смёржить»→«смёрчить») — во многом из-за
+  8 кГц записи зонда. v1: поднять sample rate (44.1/48 кГц) — ожидаемо улучшит и текст, и диаризацию.
+
+**Решение по параметрам v1: model=nova-3, language=multi, diarize=true, utterances=true,
+punctuate=true, smart_format=true.** Живой образец ответа: docs/research/deepgram-sample-response.json
