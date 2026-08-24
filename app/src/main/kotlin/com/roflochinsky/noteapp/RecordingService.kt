@@ -11,7 +11,7 @@ import android.media.MediaRecorder
 import android.os.IBinder
 import android.util.Log
 import com.roflochinsky.noteapp.pipeline.NotesStore
-import com.roflochinsky.noteapp.pipeline.TranscribeWorker
+import com.roflochinsky.noteapp.pipeline.PipelineQueue
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -132,7 +132,7 @@ class RecordingService : Service() {
                 File(NotesStore.noteDir(this, id), NotesStore.MARKS)
                     .writeText(marks.joinToString("\n"))
             }
-            if (bytes > 0) TranscribeWorker.enqueue(this, id)
+            if (bytes > 0) PipelineQueue.enqueue(this, id)
         }
         currentNoteId = null
         stopSelfSafely()

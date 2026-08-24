@@ -5,10 +5,7 @@ import android.media.MediaMetadataRetriever
 import android.os.Build
 import android.util.Log
 import androidx.work.CoroutineWorker
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import androidx.work.workDataOf
 import com.roflochinsky.noteapp.Probe
 import java.io.File
 import java.io.IOException
@@ -25,6 +22,7 @@ class PushWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             val dir = NotesStore.noteDir(applicationContext, noteId)
             val transcript = File(dir, NotesStore.TRANSCRIPT_MD)
             if (!transcript.exists()) return@withContext Result.failure()
+            if (File(dir, NotesStore.PUSHED).exists()) return@withContext Result.success()
             val token = Settings.githubToken(applicationContext)
             if (token == null) {
                 Log.w(Probe.LOG_TAG, "PROBE:PUSH_SKIP no_token note=$noteId")
@@ -86,14 +84,5 @@ class PushWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         const val KEY_NOTE_ID = "noteId"
         private const val ERR_PREVIEW = 200
         private const val MS_IN_SEC = 1000L
-
-        fun enqueue(context: Context, noteId: String) {
-            WorkManager.getInstance(context)
-                .enqueue(
-                    OneTimeWorkRequestBuilder<PushWorker>()
-                        .setInputData(workDataOf(KEY_NOTE_ID to noteId))
-                        .build()
-                )
-        }
     }
 }

@@ -30,8 +30,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.roflochinsky.noteapp.pipeline.NotesStore
+import com.roflochinsky.noteapp.pipeline.PipelineQueue
 import com.roflochinsky.noteapp.pipeline.Settings
-import com.roflochinsky.noteapp.pipeline.TranscribeWorker
 
 /** Служебный экран (дизайн-лента придёт срезом С5): статус, заметки, ключ Deepgram. */
 class MainActivity : ComponentActivity() {
@@ -80,8 +80,8 @@ class MainActivity : ComponentActivity() {
                         HorizontalDivider()
                         // ponytail: пока есть нерасшифрованные — перечитываем каждые 2с;
                         // нормальная подписка на WorkManager придёт с лентой С5.
-                        LaunchedEffect(notes.any { !it.transcribed }) {
-                            while (notes.any { !it.transcribed }) {
+                        LaunchedEffect(notes.any { !it.pushed }) {
+                            while (notes.any { !it.pushed }) {
                                 kotlinx.coroutines.delay(POLL_MS)
                                 refresh()
                             }
@@ -135,14 +135,17 @@ class MainActivity : ComponentActivity() {
                     note.id + if (note.pushed) " · в GitHub" else "",
                     style = MaterialTheme.typography.titleSmall,
                 )
-                if (!note.transcribed) {
-                    TextButton(onClick = { TranscribeWorker.enqueue(this@MainActivity, note.id) }) {
-                        Text("Расшифровать")
+                if (!note.pushed) {
+                    TextButton(onClick = { PipelineQueue.enqueue(this@MainActivity, note.id) }) {
+                        Text("Повторить")
                     }
                 }
             }
             Text(
-                if (note.transcribed) note.preview else "расшифровка не готова",
+                when {
+                    note.transcribed -> note.preview
+                    else -> "в очереди — расшифровка"
+                },
                 style = MaterialTheme.typography.bodySmall,
             )
         }

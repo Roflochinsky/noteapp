@@ -3,10 +3,7 @@ package com.roflochinsky.noteapp.pipeline
 import android.content.Context
 import android.util.Log
 import androidx.work.CoroutineWorker
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import androidx.work.workDataOf
 import com.roflochinsky.noteapp.Probe
 import java.io.File
 import java.io.IOException
@@ -26,6 +23,7 @@ class TranscribeWorker(context: Context, params: WorkerParameters) :
             val dir = NotesStore.noteDir(applicationContext, noteId)
             val audio = File(dir, NotesStore.AUDIO)
             if (!audio.exists()) return@withContext Result.failure()
+            if (File(dir, NotesStore.TRANSCRIPT_MD).exists()) return@withContext Result.success()
             val key = Settings.deepgramKey(applicationContext)
             if (key == null) {
                 Log.w(Probe.LOG_TAG, "PROBE:STT_SKIP no_key note=$noteId")
@@ -37,7 +35,6 @@ class TranscribeWorker(context: Context, params: WorkerParameters) :
                 val md = TranscriptMapper.toMarkdown(TranscriptMapper.fromDeepgramJson(json))
                 File(dir, NotesStore.TRANSCRIPT_MD).writeText(md)
                 Log.i(Probe.LOG_TAG, "PROBE:STT_OK note=$noteId chars=${md.length}")
-                PushWorker.enqueue(applicationContext, noteId)
                 Result.success()
             } catch (e: IOException) {
                 Log.w(Probe.LOG_TAG, "PROBE:STT_RETRY note=$noteId ${e.message?.take(ERR_PREVIEW)}")
@@ -48,14 +45,5 @@ class TranscribeWorker(context: Context, params: WorkerParameters) :
     companion object {
         const val KEY_NOTE_ID = "noteId"
         private const val ERR_PREVIEW = 200
-
-        fun enqueue(context: Context, noteId: String) {
-            WorkManager.getInstance(context)
-                .enqueue(
-                    OneTimeWorkRequestBuilder<TranscribeWorker>()
-                        .setInputData(workDataOf(KEY_NOTE_ID to noteId))
-                        .build()
-                )
-        }
     }
 }
