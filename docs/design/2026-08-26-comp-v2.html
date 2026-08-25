@@ -1,0 +1,481 @@
+<title>noteapp · Документ v2 — задачник</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&family=Roboto+Mono:wght@400;500&display=swap">
+
+<!--
+THESIS: задачи — те же документы в той же бумаге. Трекер без канбана и карточек со статус-бейджами: приоритет — рубрика, статус — чекбокс, фильтр — чип, правка — коммит.
+OWN-WORLD: мир v1 «Документ» без изменений — холодная бумага #FBFBF9, чернильный найви #1F2A44, синий #3A6FB8 (вкладки, ссылки, активные чипы), коралл #E8553F только REC, янтарь — внимание/просрочка, зелёный — доставлено; + #B3261E только на деструктивной кнопке (нативная афорданс Android). Roboto + Roboto Mono (цифры).
+STORY: Никита переключает вкладку «Задачи», чипами сужает до проекта, щёлкает чекбоксы; правка полей и удаление уходят коммитами в тот же репо.
+FIRST VIEWPORT: вкладки Заметки|Задачи в шапке, строка чипов-фильтров, рубрики P1/P2/P3, внизу «Новая задача».
+FORM: расширение утверждённого скелета А «Документ» (пин владельца, тикет nikitatrubaev-pdj.4); лотерея снята пином — extension без seed.
+FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md — для компа: вердикт impeccable-finish-reviewer + утверждение в тикете nikitatrubaev-5dd.3.
+-->
+
+<style>
+  :root{--g-bg:#F4F6F7; --g-ink:#1B2427; --g-mut:#5C6E74; --g-line:#D8E0E2;}
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){--g-bg:#111517; --g-ink:#E8EDEE; --g-mut:#93A5AA; --g-line:#27313499;}
+  }
+  :root[data-theme="dark"]{--g-bg:#111517; --g-ink:#E8EDEE; --g-mut:#93A5AA; --g-line:#27313499;}
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--g-bg); color:var(--g-ink); font-family:"Roboto",system-ui,sans-serif; line-height:1.5}
+  .wrap{max-width:3400px; margin:0 auto; padding:44px 30px 90px}
+  .gal h1{font-family:"Roboto",sans-serif; font-weight:700; font-size:clamp(1.6rem,3vw,2.2rem); letter-spacing:-0.02em}
+  .gal p{color:var(--g-mut); max-width:64ch; margin-top:8px}
+  .row{display:flex; gap:26px; overflow-x:auto; padding:26px 2px 20px; align-items:flex-start}
+  .board{flex:0 0 auto}
+  .board figcaption{margin-top:10px; font-size:.85rem; color:var(--g-mut); text-align:center}
+
+  /* ===== мир «Документ» — фиксированные цвета (v1) ===== */
+  .doc{--paper:#FBFBF9; --paper2:#F3F3EE; --ink:#1F2A44; --mut:#6A7386; --line:#E3E3DC; --blue:#3A6FB8; --blue-soft:#3A6FB81A;
+       --rec:#E8553F; --amber:#8A5A0F; --green:#2E7D53; --nav:#243B63; --err:#B3261E;}
+  .phone{width:393px; height:852px; border-radius:28px; overflow:hidden; position:relative; box-shadow:0 12px 32px -12px #0006;
+         display:flex; flex-direction:column; background:var(--paper); color:var(--ink); font-family:"Roboto",sans-serif}
+  .sb{display:flex; justify-content:space-between; align-items:center; font-size:.78rem; padding:12px 22px 4px; font-family:"Roboto Mono",monospace; color:var(--mut)}
+  .ic{width:22px;height:22px;flex:0 0 auto}
+  .ic-s{width:16px;height:16px;flex:0 0 auto}
+
+  .appbar{display:flex; align-items:center; justify-content:space-between; padding:16px 22px 6px}
+  .appbar .icons{display:flex; gap:16px; color:var(--mut)}
+  .appbar .ic{color:var(--mut)}
+  /* v2: вкладки-переключатель в шапке */
+  .switch{display:flex; gap:18px; align-items:baseline}
+  .switch b{font-family:"Roboto",sans-serif; font-size:1.45rem; font-weight:800; letter-spacing:-0.02em; color:var(--ink)}
+  .switch span{font-family:"Roboto",sans-serif; font-size:1.45rem; font-weight:800; letter-spacing:-0.02em; color:var(--mut)}
+  .switch .cnt{font-family:"Roboto Mono",monospace; font-size:.78rem; font-weight:400; color:var(--mut); margin-left:2px}
+
+  /* v2: чипы-фильтры */
+  .chips{display:flex; gap:8px; padding:10px 22px 12px; overflow:hidden}
+  .chip{display:inline-flex; align-items:center; gap:6px; padding:7px 12px; border-radius:9px; border:1px solid var(--line);
+        font-size:.82rem; color:var(--mut); white-space:nowrap; background:none; font-family:inherit}
+  .chip svg{width:12px;height:12px}
+  .chip.on{background:var(--blue-soft); border-color:var(--blue); color:var(--blue); font-weight:600}
+
+  .day{font-size:.75rem; letter-spacing:.06em; text-transform:uppercase; color:var(--mut); padding:18px 22px 4px}
+  .doc-item{padding:14px 22px 16px}
+  .doc-item + .doc-item{border-top:1px solid var(--line)}
+  .doc-item h4{font-family:"Roboto",sans-serif; font-weight:700; font-size:1.02rem; letter-spacing:-0.01em; line-height:1.3}
+  .doc-item .prev{color:var(--mut); font-size:.88rem; line-height:1.45; margin-top:5px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden}
+  .doc-item .meta{display:flex; gap:8px; align-items:center; margin-top:7px; font-size:.78rem; color:var(--mut)}
+  .doc-item .meta .tm{font-family:"Roboto Mono",monospace}
+  .doc-item .meta .sep{opacity:.5}
+  .doc-item .meta .ok{color:var(--green); display:inline-flex; align-items:center; gap:4px}
+  .recbar{margin-top:auto; padding:14px 22px 28px; background:linear-gradient(#FBFBF900,var(--paper) 45%)}
+  .recbtn{display:flex; align-items:center; justify-content:center; gap:10px; width:100%; padding:16px; border-radius:14px; background:var(--nav); color:#F4F7FB; font-weight:600; font-size:1rem; border:none; font-family:inherit}
+  .hint{text-align:center; color:var(--mut); font-size:.8rem; margin-top:10px}
+
+  /* v2: строка задачи */
+  .trow{display:flex; gap:12px; align-items:flex-start; padding:13px 22px}
+  .trow + .trow{border-top:1px solid var(--line)}
+  .trow .cb{width:19px; height:19px; border:1.5px solid var(--mut); border-radius:6px; flex:0 0 auto; margin-top:2px}
+  .trow.done .cb{background:var(--nav); border-color:var(--nav); display:flex; align-items:center; justify-content:center; color:#F4F7FB}
+  .trow h4{font-family:"Roboto",sans-serif; font-weight:700; font-size:.98rem; letter-spacing:-0.01em; line-height:1.35}
+  .trow.done h4{color:var(--mut); font-weight:400; text-decoration:line-through; text-decoration-color:#6A738680}
+  .trow .meta{display:flex; gap:8px; align-items:center; margin-top:5px; font-size:.78rem; color:var(--mut); flex-wrap:wrap}
+  .trow .meta .tm{font-family:"Roboto Mono",monospace}
+  .trow .meta .sep{opacity:.5}
+  .trow .meta .late{color:var(--amber); font-weight:600; display:inline-flex; gap:4px; align-items:center}
+  .trow .meta .sub{display:inline-flex; gap:4px; align-items:center}
+  .trow .meta .prog{font-family:"Roboto Mono",monospace}
+  .prio{font-size:.75rem; letter-spacing:.06em; text-transform:uppercase; color:var(--mut); padding:16px 22px 4px; display:flex; gap:8px; align-items:baseline}
+  .prio b{font-family:"Roboto Mono",monospace; font-weight:500; color:var(--ink)}
+  .fold{display:flex; gap:8px; align-items:center; padding:14px 22px; color:var(--mut); font-size:.85rem; border-top:1px solid var(--line)}
+  .fold svg{width:14px;height:14px}
+
+  /* шторки */
+  .under{position:absolute; inset:0; display:flex; flex-direction:column; pointer-events:none}
+  .under::after{content:""; position:absolute; inset:0; background:#1F2A4459}
+  .sheet{position:absolute; left:0; right:0; bottom:0; background:var(--paper); border-radius:24px 24px 0 0; box-shadow:0 -10px 30px -10px #1F2A4466; padding:10px 26px 28px; display:flex; flex-direction:column}
+  .handle{width:36px; height:4px; border-radius:2px; background:#C9CEC2; margin:2px auto 14px}
+  .sheet h5{font-size:.78rem; letter-spacing:.06em; text-transform:uppercase; color:var(--mut); font-weight:600; margin-bottom:6px}
+  .sheet .title{font-family:"Roboto",sans-serif; font-size:1.15rem; font-weight:800; letter-spacing:-0.015em; margin-bottom:8px}
+
+  /* строки выбора в шторках */
+  .opt{display:flex; gap:12px; align-items:center; padding:13px 0; border-top:1px solid var(--line); font-size:.94rem}
+  .opt:first-of-type{border-top:none}
+  .opt .rad{width:19px;height:19px;border:1.5px solid var(--mut);border-radius:50%;flex:0 0 auto}
+  .opt.on .rad{border-color:var(--blue); border-width:5.5px}
+  .opt .cb{width:19px;height:19px;border:1.5px solid var(--mut);border-radius:6px;flex:0 0 auto}
+  .opt.on .cb{background:var(--blue); border-color:var(--blue); display:flex; align-items:center; justify-content:center; color:#fff}
+  .opt .n{margin-left:auto; font-family:"Roboto Mono",monospace; font-size:.8rem; color:var(--mut)}
+  .opt small{display:block; color:var(--mut); font-size:.78rem; margin-top:1px}
+  .opt .pen{margin-left:auto; color:var(--mut)}
+  .opt.on .pen{margin-left:12px}
+  .search{display:flex; gap:10px; align-items:center; padding:11px 14px; border:1px solid var(--line); border-radius:12px; color:var(--mut); font-size:.9rem; margin:4px 0 6px}
+
+  /* деталка задачи */
+  .dt-head{padding:8px 22px 0}
+  .dt-head .nav{display:flex; justify-content:space-between; align-items:center; color:var(--mut); margin-bottom:10px}
+  .dt-head h4{font-family:"Roboto",sans-serif; font-size:1.3rem; font-weight:800; line-height:1.28; letter-spacing:-0.015em}
+  .seg{display:flex; margin:16px 22px 0; border:1px solid var(--line); border-radius:12px; overflow:hidden}
+  .seg button{flex:1; padding:10px 4px; background:none; border:none; font-family:inherit; font-size:.85rem; color:var(--mut)}
+  .seg button + button{border-left:1px solid var(--line)}
+  .seg button.on{background:var(--blue-soft); color:var(--blue); font-weight:600}
+  .fields{margin:6px 22px 0}
+  .frow{display:flex; align-items:center; gap:10px; padding:13px 0; border-bottom:1px solid var(--line); font-size:.93rem}
+  .frow .lab{color:var(--mut); width:88px; flex:0 0 auto; font-size:.85rem}
+  .frow .val{font-weight:500}
+  .frow .val.tm{font-family:"Roboto Mono",monospace; font-weight:400}
+  .frow .tagchip{display:inline-flex; padding:4px 10px; border-radius:8px; background:var(--paper2); font-size:.8rem; color:var(--ink); margin-right:6px}
+  .frow .add{color:var(--blue); font-size:.85rem}
+  .frow svg{margin-left:auto; color:var(--mut)}
+  .subs{padding:4px 22px 0}
+  .subs h5{font-size:.78rem; letter-spacing:.06em; text-transform:uppercase; color:var(--mut); font-weight:600; margin:16px 0 4px}
+  .task{display:flex; gap:10px; align-items:flex-start; font-size:.93rem; padding:8px 0}
+  .task i{width:17px; height:17px; border:1.5px solid var(--mut); border-radius:5px; display:block; flex:0 0 auto; margin-top:2px}
+  .task.on i{background:var(--nav); border-color:var(--nav); display:flex; align-items:center; justify-content:center; color:#F4F7FB}
+  .task.on span{color:var(--mut); text-decoration:line-through; text-decoration-color:#6A738680}
+  .task.addrow{color:var(--blue)}
+  .task.addrow i{border-style:dashed; border-color:var(--blue)}
+  .momentlink{display:inline-flex; gap:6px; align-items:center; color:var(--blue); font-size:.85rem; margin-top:10px}
+  .statusline{margin:14px 22px 0; padding:10px 14px; border-radius:10px; background:var(--paper2); font-size:.8rem; color:var(--mut); display:flex; align-items:center; gap:8px}
+  .statusline.push{margin-top:auto}
+  .dt-act{display:flex; gap:10px; padding:14px 22px 26px}
+  .dt-act button{flex:1; padding:13px; border-radius:12px; border:1px solid var(--line); background:none; color:var(--ink); font-family:inherit; font-size:.87rem; display:flex; align-items:center; justify-content:center; gap:8px}
+  .dt-act button.danger{color:var(--err); border-color:#B3261E33}
+
+  /* правка заметки: чипы меты */
+  .metachips{display:flex; gap:8px; padding:10px 22px 0; flex-wrap:wrap}
+  .tabs{display:flex; gap:2px; margin:14px 22px 0; border-bottom:1.5px solid var(--line)}
+  .tabs button{flex:1; padding:10px 4px 11px; background:none; border:none; font-family:inherit; font-size:.9rem; color:var(--mut); border-bottom:2px solid transparent; margin-bottom:-1.5px}
+  .tabs button.on{color:var(--blue); border-bottom-color:var(--blue); font-weight:600}
+  .body-doc{padding:18px 22px 8px; overflow:hidden; flex:1}
+  .body-doc h5{font-size:.78rem; letter-spacing:.06em; text-transform:uppercase; color:var(--mut); font-weight:600; margin:18px 0 8px; display:flex; align-items:center}
+  .body-doc h5:first-child{margin-top:0}
+  .body-doc h5 .edit{margin-left:auto; color:var(--blue); display:inline-flex; gap:5px; align-items:center; font-weight:400; letter-spacing:0; text-transform:none; font-size:.8rem}
+  .body-doc p{font-size:.93rem; line-height:1.55}
+  .body-doc ul{padding-left:18px; display:flex; flex-direction:column; gap:6px; font-size:.93rem; line-height:1.45}
+  .tlink{display:flex; gap:10px; align-items:center; padding:9px 0; font-size:.9rem; color:var(--blue)}
+  .tlink .dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+  .tlink .p{font-family:"Roboto Mono",monospace; font-size:.75rem; color:var(--mut)}
+
+  /* диалог удаления */
+  .dlg-wrap{position:absolute; inset:0; background:#1F2A4466; display:flex; align-items:center; justify-content:center; padding:26px}
+  .dlg{background:var(--paper); border-radius:24px; padding:24px 24px 14px; width:100%; box-shadow:0 18px 44px -14px #1F2A4488}
+  .dlg h4{font-family:"Roboto",sans-serif; font-size:1.2rem; font-weight:800; letter-spacing:-0.015em}
+  .dlg .sub{color:var(--mut); font-size:.88rem; margin-top:6px; line-height:1.45}
+  .dlg .opt small{font-size:.76rem}
+  .dlg .note{font-size:.78rem; color:var(--mut); margin-top:10px}
+  .dlg-act{display:flex; justify-content:flex-end; gap:8px; margin-top:14px}
+  .dlg-act button{padding:11px 14px; border:none; background:none; font-family:inherit; font-size:.9rem; font-weight:600; border-radius:10px}
+  .dlg-act .cancel{color:var(--blue)}
+  .dlg-act .del{color:var(--err)}
+
+  /* новая задача */
+  .input{padding:13px 14px; border:1.5px solid var(--blue); border-radius:12px; font-size:1rem; margin:2px 0 12px; color:var(--ink)}
+  .input .caret{border-left:1.5px solid var(--ink); margin-left:1px; animation:none}
+  .input .ph{color:#A6ACB9}
+  .cta{margin-top:16px; padding:15px; border-radius:14px; border:none; background:var(--nav); color:#F4F7FB; font-weight:700; font-size:.98rem; font-family:inherit; width:100%}
+
+  @media (max-width:760px){ .wrap{padding:28px 14px 60px} }
+</style>
+
+<div class="wrap doc">
+<header class="gal">
+  <h1>noteapp · «Документ» v2 — задачник</h1>
+  <p>Расширение утверждённого мира v1: вкладка «Задачи» рядом с лентой, фильтры-чипы в обеих, правка полей и удаление — коммитами в репо. Приоритет — рубрика, статус — чекбокс, канбана нет.</p>
+</header>
+<div class="row">
+
+<!-- ═══ 1. Задачи — список ═══ -->
+<figure class="board">
+<div class="phone">
+  <div class="sb"><span>18:41</span><span style="display:flex;gap:5px;align-items:center"><svg width="14" height="12" viewBox="0 0 14 12" fill="currentColor"><rect x="0" y="8" width="2.5" height="4" rx="1"/><rect x="4" y="5" width="2.5" height="7" rx="1"/><rect x="8" y="2" width="2.5" height="10" rx="1"/></svg><svg width="15" height="12" viewBox="0 0 15 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1.5 4.5a9 9 0 0 1 12 0M4 7.2a5.4 5.4 0 0 1 7 0"/><circle cx="7.5" cy="10" r="1.3" fill="currentColor" stroke="none"/></svg><svg width="20" height="11" viewBox="0 0 20 11" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="0.7" y="0.7" width="15.6" height="9.6" rx="2.5"/><rect x="2.5" y="2.5" width="9" height="6" rx="1.2" fill="currentColor" stroke="none"/><path d="M18.6 3.8v3.4" stroke-linecap="round"/></svg></span></div>
+  <div class="appbar">
+    <div class="switch"><span>Заметки</span><b>Задачи<span class="cnt">6</span></b></div>
+    <div class="icons">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5a7 7 0 0 0 0 2.4l-2 1.5 2 3.4 2.3-.9a7 7 0 0 0 2 1.2l.4 2.6h4l.4-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5c.06-.4.1-.8.1-1.2Z"/></svg>
+    </div>
+  </div>
+  <div class="chips">
+    <button class="chip">Проект<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+    <button class="chip">Приоритет<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+    <button class="chip on">Открытые<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    <button class="chip">Тег<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+    <button class="chip">Срок<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+  </div>
+  <div class="prio"><b>P1</b>высокий</div>
+  <div class="trow">
+    <span class="cb"></span>
+    <div><h4>Фикс ретраев очереди</h4>
+      <div class="meta"><span>tgsum</span><span class="sep">·</span><span class="tm">до пт</span><span class="sep">·</span><span class="sub"><span class="prog">1/3</span></span></div>
+    </div>
+  </div>
+  <div class="trow">
+    <span class="cb"></span>
+    <div><h4>Продлить домен roflochinsky.dev</h4>
+      <div class="meta"><span class="late"><svg class="ic-s" style="width:13px;height:13px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>просрочено · вчера</span><span class="sep">·</span><span>#деньги</span></div>
+    </div>
+  </div>
+  <div class="prio"><b>P2</b>обычный</div>
+  <div class="trow">
+    <span class="cb"></span>
+    <div><h4>Согласовать экспорт тем с Димой</h4>
+      <div class="meta"><span>tgsum</span><span class="sep">·</span><span class="sub"><span class="prog">2/3</span></span><span class="sep">·</span><span>#релиз</span></div>
+    </div>
+  </div>
+  <div class="trow">
+    <span class="cb"></span>
+    <div><h4>Виджет очереди — три варианта сетки</h4>
+      <div class="meta"><span>noteapp</span></div>
+    </div>
+  </div>
+  <div class="trow">
+    <span class="cb"></span>
+    <div><h4>Забрать посылку с проходной</h4>
+      <div class="meta"><span class="tm">до вт</span></div>
+    </div>
+  </div>
+  <div class="prio"><b>P3</b>низкий</div>
+  <div class="trow">
+    <span class="cb"></span>
+    <div><h4>Разобрать фото с похода</h4>
+      <div class="meta"><span>#личное</span></div>
+    </div>
+  </div>
+  <div class="fold">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+    Сделано за месяц · 4
+  </div>
+  <div class="recbar">
+    <button class="recbtn"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Новая задача</button>
+    <div class="hint">задача станет файлом в tasks/ и уйдёт коммитом</div>
+  </div>
+</div>
+<figcaption>Задачи — плоский список по приоритету</figcaption>
+</figure>
+
+<!-- ═══ 2. Задачи — фильтр «Проект» ═══ -->
+<figure class="board">
+<div class="phone">
+  <div class="under">
+    <div class="sb"><span>18:41</span><span style="display:flex;gap:5px;align-items:center"><svg width="14" height="12" viewBox="0 0 14 12" fill="currentColor"><rect x="0" y="8" width="2.5" height="4" rx="1"/><rect x="4" y="5" width="2.5" height="7" rx="1"/><rect x="8" y="2" width="2.5" height="10" rx="1"/></svg><svg width="15" height="12" viewBox="0 0 15 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1.5 4.5a9 9 0 0 1 12 0M4 7.2a5.4 5.4 0 0 1 7 0"/><circle cx="7.5" cy="10" r="1.3" fill="currentColor" stroke="none"/></svg><svg width="20" height="11" viewBox="0 0 20 11" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="0.7" y="0.7" width="15.6" height="9.6" rx="2.5"/><rect x="2.5" y="2.5" width="9" height="6" rx="1.2" fill="currentColor" stroke="none"/><path d="M18.6 3.8v3.4" stroke-linecap="round"/></svg></span></div>
+    <div class="appbar"><div class="switch"><span>Заметки</span><b>Задачи</b></div></div>
+    <div class="chips"><button class="chip">Проект<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button><button class="chip on">Открытые</button></div>
+    <div class="prio"><b>P1</b>высокий</div>
+    <div class="trow"><span class="cb"></span><div><h4>Фикс ретраев очереди</h4><div class="meta"><span>tgsum</span></div></div></div>
+  </div>
+  <div class="sheet">
+    <div class="handle"></div>
+    <div class="title">Проект</div>
+    <div class="opt on"><span class="rad"></span>Все проекты<span class="n">6</span></div>
+    <div class="opt"><span class="rad"></span>tgsum<span class="n">2</span></div>
+    <div class="opt"><span class="rad"></span>workwatch<span class="n">0</span></div>
+    <div class="opt"><span class="rad"></span>noteapp<span class="n">1</span></div>
+    <div class="opt"><span class="rad"></span>Без проекта<span class="n">3</span></div>
+    <div class="opt" style="color:var(--blue)"><svg class="ic-s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Новый проект<span class="n" style="color:var(--mut);font-family:Roboto,sans-serif">запишется в projects.md</span></div>
+  </div>
+</div>
+<figcaption>Фильтр по проекту — из реестра репо</figcaption>
+</figure>
+
+<!-- ═══ 3. Деталка задачи ═══ -->
+<figure class="board">
+<div class="phone">
+  <div class="sb"><span>18:42</span><span style="display:flex;gap:5px;align-items:center"><svg width="14" height="12" viewBox="0 0 14 12" fill="currentColor"><rect x="0" y="8" width="2.5" height="4" rx="1"/><rect x="4" y="5" width="2.5" height="7" rx="1"/><rect x="8" y="2" width="2.5" height="10" rx="1"/></svg><svg width="15" height="12" viewBox="0 0 15 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1.5 4.5a9 9 0 0 1 12 0M4 7.2a5.4 5.4 0 0 1 7 0"/><circle cx="7.5" cy="10" r="1.3" fill="currentColor" stroke="none"/></svg><svg width="20" height="11" viewBox="0 0 20 11" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="0.7" y="0.7" width="15.6" height="9.6" rx="2.5"/><rect x="2.5" y="2.5" width="9" height="6" rx="1.2" fill="currentColor" stroke="none"/><path d="M18.6 3.8v3.4" stroke-linecap="round"/></svg></span></div>
+  <div class="dt-head">
+    <div class="nav">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-4-4L4 16v4Z"/></svg>
+    </div>
+    <h4>Фикс ретраев очереди</h4>
+  </div>
+  <div class="seg">
+    <button class="on">Открыта</button>
+    <button>В работе</button>
+    <button>Сделана</button>
+  </div>
+  <div class="fields">
+    <div class="frow"><span class="lab">Проект</span><span class="val">tgsum</span><svg class="ic-s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+    <div class="frow"><span class="lab">Приоритет</span><span class="val">P1 · высокий</span><svg class="ic-s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+    <div class="frow"><span class="lab">Срок</span><span class="val tm">пт · 28 авг</span><svg class="ic-s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+    <div class="frow"><span class="lab">Теги</span><span><span class="tagchip">#релиз</span></span><span class="add">+ тег</span></div>
+  </div>
+  <div class="subs">
+    <h5>Подзадачи · 1/3</h5>
+    <div class="task on"><i><svg class="ic-s" style="width:11px;height:11px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4 4 10-11"/></svg></i><span>Воспроизвести баг на длинной записи</span></div>
+    <div class="task"><i></i><span>Экспоненциальный бэкофф в PushWorker</span></div>
+    <div class="task"><i></i><span>Тест на потерю сети посреди пуша</span></div>
+    <div class="task addrow"><i></i><span>Добавить подзадачу</span></div>
+    <a class="momentlink" href="#"><svg class="ic-s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-2M14 4h6v6M20 4l-9 9"/></svg>из заметки: Созвон с Димой — релиз tgsum</a>
+  </div>
+  <div class="statusline push"><svg class="ic-s" viewBox="0 0 24 24" fill="none" stroke="#2E7D53" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4 4 10-11"/></svg>tasks/2026-08-25-fix-retraev.md · правки уходят коммитом</div>
+  <div class="dt-act">
+    <button class="danger"><svg class="ic-s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m3 0-1 13a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1L6 7"/></svg>Удалить</button>
+    <button><svg class="ic-s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M11 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-6"/></svg>Открыть в GitHub</button>
+  </div>
+</div>
+<figcaption>Деталка задачи — всё правится на месте</figcaption>
+</figure>
+
+<!-- ═══ 4. Новая задача ═══ -->
+<figure class="board">
+<div class="phone">
+  <div class="under">
+    <div class="sb"><span>18:43</span><span style="display:flex;gap:5px;align-items:center"><svg width="14" height="12" viewBox="0 0 14 12" fill="currentColor"><rect x="0" y="8" width="2.5" height="4" rx="1"/><rect x="4" y="5" width="2.5" height="7" rx="1"/><rect x="8" y="2" width="2.5" height="10" rx="1"/></svg><svg width="15" height="12" viewBox="0 0 15 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1.5 4.5a9 9 0 0 1 12 0M4 7.2a5.4 5.4 0 0 1 7 0"/><circle cx="7.5" cy="10" r="1.3" fill="currentColor" stroke="none"/></svg><svg width="20" height="11" viewBox="0 0 20 11" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="0.7" y="0.7" width="15.6" height="9.6" rx="2.5"/><rect x="2.5" y="2.5" width="9" height="6" rx="1.2" fill="currentColor" stroke="none"/><path d="M18.6 3.8v3.4" stroke-linecap="round"/></svg></span></div>
+    <div class="appbar"><div class="switch"><span>Заметки</span><b>Задачи</b></div></div>
+    <div class="prio"><b>P1</b>высокий</div>
+    <div class="trow"><span class="cb"></span><div><h4>Фикс ретраев очереди</h4><div class="meta"><span>tgsum</span></div></div></div>
+  </div>
+  <div class="sheet">
+    <div class="handle"></div>
+    <div class="title">Новая задача</div>
+    <div class="input">Купить переходник USB-C<span class="caret">&nbsp;</span></div>
+    <div class="chips" style="padding:0; flex-wrap:wrap">
+      <button class="chip">Без проекта<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+      <button class="chip on">P2</button>
+      <button class="chip">Срок<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+      <button class="chip">#тег</button>
+    </div>
+    <button class="cta">Создать задачу</button>
+    <div class="hint">tasks/2026-08-25-kupit-perekhodnik.md · один коммит</div>
+  </div>
+</div>
+<figcaption>Ручное создание — шторка</figcaption>
+</figure>
+
+<!-- ═══ 5. Лента заметок v2 ═══ -->
+<figure class="board">
+<div class="phone">
+  <div class="sb"><span>18:44</span><span style="display:flex;gap:5px;align-items:center"><svg width="14" height="12" viewBox="0 0 14 12" fill="currentColor"><rect x="0" y="8" width="2.5" height="4" rx="1"/><rect x="4" y="5" width="2.5" height="7" rx="1"/><rect x="8" y="2" width="2.5" height="10" rx="1"/></svg><svg width="15" height="12" viewBox="0 0 15 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1.5 4.5a9 9 0 0 1 12 0M4 7.2a5.4 5.4 0 0 1 7 0"/><circle cx="7.5" cy="10" r="1.3" fill="currentColor" stroke="none"/></svg><svg width="20" height="11" viewBox="0 0 20 11" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="0.7" y="0.7" width="15.6" height="9.6" rx="2.5"/><rect x="2.5" y="2.5" width="9" height="6" rx="1.2" fill="currentColor" stroke="none"/><path d="M18.6 3.8v3.4" stroke-linecap="round"/></svg></span></div>
+  <div class="appbar">
+    <div class="switch"><b>Заметки</b><span>Задачи</span></div>
+    <div class="icons">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5a7 7 0 0 0 0 2.4l-2 1.5 2 3.4 2.3-.9a7 7 0 0 0 2 1.2l.4 2.6h4l.4-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5c.06-.4.1-.8.1-1.2Z"/></svg>
+    </div>
+  </div>
+  <div class="chips">
+    <button class="chip">Тип<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+    <button class="chip on">Персона: Дима<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    <button class="chip">Проект<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+    <button class="chip">Тег<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+    <button class="chip">Дата<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+  </div>
+  <div class="day">Вчера</div>
+  <div class="doc-item">
+    <h4>Созвон с Димой — релиз tgsum</h4>
+    <div class="prev">Релиз tgsum v0.2 — в пятницу. Дима берёт экспорт тем, Никита — фикс очереди. Формат Markdown не трогаем до v0.3.</div>
+    <div class="meta"><span class="tm">18:07</span><span class="sep">·</span><span class="tm">12:31</span><span class="sep">·</span><span>встреча · Дима</span><span class="sep">·</span><span class="ok"><svg class="ic-s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4 4 10-11"/></svg>в GitHub</span></div>
+  </div>
+  <div class="day">12 августа</div>
+  <div class="doc-item">
+    <h4>Дима — идея про экспорт в Notion</h4>
+    <div class="prev">Дима предлагает экспорт прямо в Notion через их API. Посмотреть лимиты, прикинуть после релиза v0.2.</div>
+    <div class="meta"><span class="tm">19:22</span><span class="sep">·</span><span class="tm">03:05</span><span class="sep">·</span><span>идея · Дима</span><span class="sep">·</span><span class="ok"><svg class="ic-s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4 4 10-11"/></svg>в GitHub</span></div>
+  </div>
+  <div class="day">3 августа</div>
+  <div class="doc-item">
+    <h4>Планёрка — приоритеты августа</h4>
+    <div class="prev">Дима: сначала стабильность очереди, потом фичи. Оля берёт дизайн лендинга. Ретро — в конце месяца.</div>
+    <div class="meta"><span class="tm">11:02</span><span class="sep">·</span><span class="tm">24:48</span><span class="sep">·</span><span>встреча · Дима, Оля</span><span class="sep">·</span><span class="ok"><svg class="ic-s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4 4 10-11"/></svg>в GitHub</span></div>
+  </div>
+  <div class="recbar">
+    <button class="recbtn"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>Записать</button>
+    <div class="hint">или долгое нажатие кнопки питания — даже с заблокированного экрана</div>
+  </div>
+</div>
+<figcaption>Лента v2 — фильтр по персоне активен</figcaption>
+</figure>
+
+<!-- ═══ 6. Деталка заметки — правка полей ═══ -->
+<figure class="board">
+<div class="phone">
+  <div class="sb"><span>18:45</span><span style="display:flex;gap:5px;align-items:center"><svg width="14" height="12" viewBox="0 0 14 12" fill="currentColor"><rect x="0" y="8" width="2.5" height="4" rx="1"/><rect x="4" y="5" width="2.5" height="7" rx="1"/><rect x="8" y="2" width="2.5" height="10" rx="1"/></svg><svg width="15" height="12" viewBox="0 0 15 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1.5 4.5a9 9 0 0 1 12 0M4 7.2a5.4 5.4 0 0 1 7 0"/><circle cx="7.5" cy="10" r="1.3" fill="currentColor" stroke="none"/></svg><svg width="20" height="11" viewBox="0 0 20 11" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="0.7" y="0.7" width="15.6" height="9.6" rx="2.5"/><rect x="2.5" y="2.5" width="9" height="6" rx="1.2" fill="currentColor" stroke="none"/><path d="M18.6 3.8v3.4" stroke-linecap="round"/></svg></span></div>
+  <div class="dt-head">
+    <div class="nav">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+    </div>
+    <h4>Созвон с Димой — релиз tgsum</h4>
+  </div>
+  <div class="metachips">
+    <button class="chip">встреча<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+    <button class="chip">tgsum<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+    <button class="chip">Дима, Никита<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button class="chip">#релиз</button>
+  </div>
+  <div class="tabs">
+    <button class="on">Саммари</button>
+    <button>Транскрипт</button>
+    <button>Аудио</button>
+  </div>
+  <div class="body-doc">
+    <h5>Суть<span class="edit"><svg class="ic-s" style="width:13px;height:13px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-4-4L4 16v4Z"/></svg>Править</span></h5>
+    <p>Релиз tgsum v0.2 назначен на пятницу. Дима берёт экспорт тем, Никита — фикс очереди с ретраями. Формат Markdown заморожен до v0.3.</p>
+    <h5>Ключевое</h5>
+    <ul>
+      <li>Экспорт тем — блокер релиза, закрыть до пятницы.</li>
+      <li>Баг с ретраями в очереди — Никита, оценка «за вечер».</li>
+    </ul>
+    <h5>Задачи · в трекере</h5>
+    <div class="tlink"><span class="dot" style="background:var(--blue)"></span>Фикс ретраев очереди<span class="p">P1</span></div>
+    <div class="tlink"><span class="dot" style="background:var(--blue)"></span>Согласовать экспорт тем с Димой<span class="p">P2</span></div>
+    <p style="color:var(--mut);font-size:.8rem;margin-top:6px">Статусы живут в задачах — здесь только ссылки.</p>
+  </div>
+  <div class="statusline"><svg class="ic-s" viewBox="0 0 24 24" fill="none" stroke="#2E7D53" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4 4 10-11"/></svg>встречи/2026-08-24-1807-reliz-tgsum.md · транскрипт не редактируется</div>
+  <div class="dt-act">
+    <button class="danger"><svg class="ic-s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m3 0-1 13a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1L6 7"/></svg>Удалить</button>
+    <button><svg class="ic-s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M11 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-6"/></svg>Открыть в GitHub</button>
+  </div>
+</div>
+<figcaption>Деталка заметки v2 — поля-чипы, задачи-ссылки</figcaption>
+</figure>
+
+<!-- ═══ 7. Выбор персон ═══ -->
+<figure class="board">
+<div class="phone">
+  <div class="under">
+    <div class="sb"><span>18:45</span><span style="display:flex;gap:5px;align-items:center"><svg width="14" height="12" viewBox="0 0 14 12" fill="currentColor"><rect x="0" y="8" width="2.5" height="4" rx="1"/><rect x="4" y="5" width="2.5" height="7" rx="1"/><rect x="8" y="2" width="2.5" height="10" rx="1"/></svg><svg width="15" height="12" viewBox="0 0 15 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1.5 4.5a9 9 0 0 1 12 0M4 7.2a5.4 5.4 0 0 1 7 0"/><circle cx="7.5" cy="10" r="1.3" fill="currentColor" stroke="none"/></svg><svg width="20" height="11" viewBox="0 0 20 11" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="0.7" y="0.7" width="15.6" height="9.6" rx="2.5"/><rect x="2.5" y="2.5" width="9" height="6" rx="1.2" fill="currentColor" stroke="none"/><path d="M18.6 3.8v3.4" stroke-linecap="round"/></svg></span></div>
+    <div class="dt-head" style="padding-top:8px">
+      <h4>Созвон с Димой — релиз tgsum</h4>
+    </div>
+  </div>
+  <div class="sheet">
+    <div class="handle"></div>
+    <div class="title">Участники</div>
+    <h5>Claude услышал в записи</h5>
+    <div class="opt on"><span class="cb"><svg class="ic-s" style="width:11px;height:11px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4 4 10-11"/></svg></span><div>Дима<small>в реестре · упомянут в транскрипте</small></div><span class="pen"><svg class="ic-s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-4-4L4 16v4Z"/></svg></span></div>
+    <div class="opt"><span class="cb"></span><div>«Санёк»<small>нет в реестре — добавить как персону?</small></div></div>
+    <h5 style="margin-top:14px">Реестр · people.md</h5>
+    <div class="opt on"><span class="cb"><svg class="ic-s" style="width:11px;height:11px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4 4 10-11"/></svg></span>Никита</div>
+    <div class="opt"><span class="cb"></span>Оля<span class="pen"><svg class="ic-s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-4-4L4 16v4Z"/></svg></span></div>
+    <div class="opt"><span class="cb"></span>Лёша<span class="pen"><svg class="ic-s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-4-4L4 16v4Z"/></svg></span></div>
+    <div class="search"><svg class="ic-s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>Найти или добавить персону…</div>
+    <div class="hint" style="margin-top:6px">переименование обновит реестр и все заметки одним коммитом</div>
+  </div>
+</div>
+<figcaption>Персоны — предложения Claude + реестр</figcaption>
+</figure>
+
+<!-- ═══ 8. Диалог удаления ═══ -->
+<figure class="board">
+<div class="phone">
+  <div class="under" style="pointer-events:none">
+    <div class="sb"><span>18:46</span><span style="display:flex;gap:5px;align-items:center"><svg width="14" height="12" viewBox="0 0 14 12" fill="currentColor"><rect x="0" y="8" width="2.5" height="4" rx="1"/><rect x="4" y="5" width="2.5" height="7" rx="1"/><rect x="8" y="2" width="2.5" height="10" rx="1"/></svg><svg width="15" height="12" viewBox="0 0 15 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1.5 4.5a9 9 0 0 1 12 0M4 7.2a5.4 5.4 0 0 1 7 0"/><circle cx="7.5" cy="10" r="1.3" fill="currentColor" stroke="none"/></svg><svg width="20" height="11" viewBox="0 0 20 11" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="0.7" y="0.7" width="15.6" height="9.6" rx="2.5"/><rect x="2.5" y="2.5" width="9" height="6" rx="1.2" fill="currentColor" stroke="none"/><path d="M18.6 3.8v3.4" stroke-linecap="round"/></svg></span></div>
+    <div class="dt-head" style="padding-top:8px">
+      <h4>Созвон с Димой — релиз tgsum</h4>
+    </div>
+  </div>
+  <div class="dlg-wrap">
+    <div class="dlg">
+      <h4>Удалить заметку?</h4>
+      <div class="sub">Выберите, что именно удалить. Отменить можно только через историю git.</div>
+      <div style="margin-top:12px">
+        <div class="opt on"><span class="cb"><svg class="ic-s" style="width:11px;height:11px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4 4 10-11"/></svg></span><div>Файл заметки в репо<small>встречи/2026-08-24-1807-reliz-tgsum.md</small></div></div>
+        <div class="opt"><span class="cb"></span><div>Аудио на телефоне<small>12:31 · восстановить нельзя</small></div></div>
+        <div class="opt"><span class="cb"></span><div>Задачи из этой заметки<small>2 открытые · Фикс ретраев, Экспорт тем</small></div></div>
+      </div>
+      <div class="note">По умолчанию удаляется только файл в GitHub.</div>
+      <div class="dlg-act">
+        <button class="cancel">Отмена</button>
+        <button class="del">Удалить</button>
+      </div>
+    </div>
+  </div>
+</div>
+<figcaption>Удаление — галочки «что именно»</figcaption>
+</figure>
+
+</div>
+</div>
