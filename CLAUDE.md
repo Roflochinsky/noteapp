@@ -51,10 +51,10 @@
 | Спека из принятых решений | `to-spec` |
 | Срезы из спеки в beads | `to-tickets` |
 | Решения ещё не приняты | `grill-me` / `mattpocock-skills:grilling` |
-| Работа по карте решений | `mattpocock-skills:wayfinder` (карта nikitatrubaev-pdj) |
+| Работа по карте решений | `mattpocock-skills:wayfinder` (v1 — nikitatrubaev-pdj, закрыта; v2 — nikitatrubaev-5dd) |
 | Ревью кода | `mattpocock-skills:code-review` |
 | Баг, не работает, медленно | `mattpocock-skills:diagnosing-bugs` |
-| Любая правка UI | `impeccable:impeccable` — комп «Документ» (тикет nikitatrubaev-pdj.4) — жёсткое ограничение |
+| Любая правка UI | `impeccable:impeccable` — `DESIGN.md` + компы «Документ» v1 (nikitatrubaev-pdj.4) и v2 (nikitatrubaev-5dd.3) — жёсткое ограничение |
 | Доки при коммите | `update-docs` |
 | Непонятно объяснил | `/wait-what` (зовёт владелец) |
 
