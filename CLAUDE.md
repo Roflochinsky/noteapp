@@ -13,7 +13,7 @@
 | Слой | Команды |
 |---|---|
 | Приложение (Kotlin) | `./gradlew ktfmtCheck detekt lint testDebugUnitTest assembleDebug` |
-| GitHub Actions | `actionlint .github/workflows/*.yml` |
+| GitHub Actions | `actionlint docs/examples/process-notes.yml` (эталон для репо заметок; своих workflow у репо нет) |
 | Хуки харнесса | `python3 .claude/hooks/tests/test_destructive_fs_guard.py` |
 | Всё разом (гигиена) | `pre-commit run --all-files` |
 
