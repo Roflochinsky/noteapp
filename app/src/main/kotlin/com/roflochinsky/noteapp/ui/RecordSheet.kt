@@ -101,7 +101,7 @@ fun RecordSheet(onMark: () -> Unit, onStop: () -> Unit, onDismiss: () -> Unit) {
                     shape = RoundedCornerShape(14.dp),
                 ) {
                     Text(
-                        "Отметить момент",
+                        "⚑ Момент",
                         color = DocPalette.Nav,
                         maxLines = 1,
                         softWrap = false,
