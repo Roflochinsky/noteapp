@@ -18,11 +18,25 @@ android {
     versionName = "1.0"
   }
 
+  signingConfigs {
+    create("release") {
+      // Ключ и пароли — в ~/.gradle/gradle.properties (NOTEAPP_*), в репо не попадают.
+      providers.gradleProperty("NOTEAPP_STORE_FILE").orNull?.let { path ->
+        storeFile = file(path)
+        storePassword = providers.gradleProperty("NOTEAPP_STORE_PASSWORD").get()
+        keyAlias = providers.gradleProperty("NOTEAPP_KEY_ALIAS").get()
+        keyPassword = providers.gradleProperty("NOTEAPP_KEY_PASSWORD").get()
+      }
+    }
+  }
+
   buildTypes {
     release {
-      // ponytail: подпись debug-ключом этой машины — релиз ставится апдейтом поверх
-      // установленной сборки; отдельный keystore заведём, если собирать станет кто-то ещё.
-      signingConfig = signingConfigs.getByName("debug")
+      // Без NOTEAPP_* (чужая машина/CI) — debug-подпись, чтобы сборка не падала.
+      signingConfig =
+        if (providers.gradleProperty("NOTEAPP_STORE_FILE").isPresent)
+          signingConfigs.getByName("release")
+        else signingConfigs.getByName("debug")
     }
   }
 
