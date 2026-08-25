@@ -31,8 +31,11 @@ Action срабатывает на каждый пуш в `inbox/`: пишет �
    имя `CLAUDE_CODE_OAUTH_TOKEN`, значение — токен из шага 1.
 3. Положи в репо заметок файл `.github/workflows/process-notes.yml` — эталон:
    [`docs/examples/process-notes.yml`](examples/process-notes.yml) (копия рабочего workflow).
-   Ключевое в нём: триггер `on: push` по путям `inbox/**`, `permissions: contents: write`,
-   шаг `anthropics/claude-code-action@v1` с промптом-контрактом из спеки.
+   Ключевое в нём: триггер `on: push` по путям `inbox/**` + релей-джоб, который
+   перезапускает workflow как `workflow_dispatch` (сам `claude-code-action` событие push
+   не поддерживает — ADR `adr/2026-08-25-action-trigger-relay.md`), `permissions:
+   contents: write` и `actions: write`, шаг `anthropics/claude-code-action@v1` с
+   промптом-контрактом из спеки.
 
 ## 3. Токен GitHub для телефона
 

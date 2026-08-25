@@ -1,7 +1,8 @@
 # Эталон workflow для РЕПО ЗАМЕТОК (не этого репо!) — копия рабочего
 # Roflochinsky/voice-notes/.github/workflows/process-notes.yml.
 # Контракт формата и промпта — docs/specs/2026-08-24-note-format.md (ADR-гейт:
-# менять промпт только вместе со спекой).
+# менять промпт только вместе со спекой; триггер-релей — ADR
+# docs/adr/2026-08-25-action-trigger-relay.md).
 name: Обработка заметок
 
 on:
@@ -13,13 +14,30 @@ on:
 permissions:
   contents: write
   id-token: write
+  actions: write
 
 concurrency:
   group: process-notes
   cancel-in-progress: false
 
 jobs:
+  # claude-code-action не поддерживает событие push (src/github/context.ts —
+  # только dispatch/schedule/workflow_run и issues/PR), поэтому push лишь
+  # перезапускает этот же workflow как workflow_dispatch. Рекурсии нет:
+  # workflow_dispatch — документированное исключение из защиты GITHUB_TOKEN.
+  relay:
+    # ponytail: guard по имени claude[bot] — чтобы пуш самого Action (перенос из
+    # inbox/) не запускал холостой Claude-прогон; сломается, только если сменится
+    # app-имя у claude-code-action.
+    if: github.event_name == 'push' && github.triggering_actor != 'claude[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run process-notes.yml --repo "$GITHUB_REPOSITORY" --ref main
+
   process:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
