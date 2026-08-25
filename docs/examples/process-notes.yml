@@ -45,6 +45,9 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Релей диспатчит через GITHUB_TOKEN → актор запуска github-actions (бот);
+          # без allowed_bots action отклоняет небот-человеческие запуски.
+          allowed_bots: "github-actions"
           claude_args: "--allowedTools Bash,Read,Write,Edit,Glob,Grep --max-turns 40"
           prompt: |
             Ты обрабатываешь новые голосовые заметки в этом репозитории. Контракт формата —
