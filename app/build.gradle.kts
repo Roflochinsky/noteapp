@@ -14,8 +14,16 @@ android {
     applicationId = "com.roflochinsky.noteapp"
     minSdk = 34
     targetSdk = 35
-    versionCode = 1
-    versionName = "0.1-probe"
+    versionCode = 2
+    versionName = "1.0"
+  }
+
+  buildTypes {
+    release {
+      // ponytail: подпись debug-ключом этой машины — релиз ставится апдейтом поверх
+      // установленной сборки; отдельный keystore заведём, если собирать станет кто-то ещё.
+      signingConfig = signingConfigs.getByName("debug")
+    }
   }
 
   compileOptions {

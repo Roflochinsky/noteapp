@@ -1,0 +1,63 @@
+# Эталон workflow для РЕПО ЗАМЕТОК (не этого репо!) — копия рабочего
+# Roflochinsky/voice-notes/.github/workflows/process-notes.yml.
+# Контракт формата и промпта — docs/specs/2026-08-24-note-format.md (ADR-гейт:
+# менять промпт только вместе со спекой).
+name: Обработка заметок
+
+on:
+  push:
+    paths:
+      - "inbox/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: process-notes
+  cancel-in-progress: false
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: "--allowedTools Bash,Read,Write,Edit,Glob,Grep --max-turns 40"
+          prompt: |
+            Ты обрабатываешь новые голосовые заметки в этом репозитории. Контракт формата —
+            репо Roflochinsky/noteapp, docs/specs/2026-08-24-note-format.md; всё нужное
+            повторено здесь.
+
+            Для КАЖДОГО файла в inbox/ со `status: raw` в frontmatter:
+            1. Прочитай транскрипт (и секцию «## Моменты», если есть — это тайм-коды важных
+               мест, учитывай их в саммари).
+            2. Определи:
+               - `type` — ровно один из: встреча, идея, задача, личное, другое;
+               - `participants` — имена, реально упомянутые в разговоре (пустой список [],
+                 если имён нет);
+               - короткий `title` по-русски;
+               - слаг для имени файла: латиница, kebab-case, из темы.
+            3. Добавь СВЕРХУ тела (после frontmatter) секцию:
+               ## Саммари
+               **Суть.** 1–3 предложения.
+               **Ключевое.**
+               - пункты (если есть что выделить)
+               **Задачи.**
+               - [ ] ответственный — действие (секцию опусти, если задач нет)
+            4. Обнови frontmatter: добавь type, participants, title; смени status на done.
+               Поле recorded, duration, device не трогай. Транскрипт не переписывай.
+            5. Перемести файл в папку типа во множественном числе (встреча→встречи,
+               идея→идеи, задача→задачи, личное→личное, другое→другое) с именем
+               `<та же дата-время>-<слаг>.md` (пример: встречи/2026-08-24-1807-reliz-tgsum.md).
+            6. Если inbox/ пуст или raw-файлов нет — ничего не делай и заверши работу.
+
+            Когда все файлы обработаны:
+            git config user.name "github-actions[bot]" &&
+            git config user.email "github-actions[bot]@users.noreply.github.com",
+            закоммить все изменения одним коммитом с русским сообщением
+            (например: «Обработаны заметки: <имена>») и сделай git push.
