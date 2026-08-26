@@ -7,15 +7,19 @@
 ## Обязательная верификация
 
 Перед словом «готово» прогнать блоки затронутых слоёв и показать реальный вывод.
-Пока Gradle-модуля нет, блок «Приложение» не существует — его заводит первый срез с кодом
-и обновляет эту таблицу тем же коммитом.
 
 | Слой | Команды |
 |---|---|
-| Приложение (Kotlin) | `./gradlew ktfmtCheck detekt lint testDebugUnitTest assembleDebug` |
-| GitHub Actions | `actionlint .github/workflows/*.yml` |
+| Приложение (Kotlin) | `JAVA_HOME=~/.local/java/jdk17 ./gradlew ktfmtCheck detekt lint testDebugUnitTest assembleDebug` |
+| GitHub Actions | `actionlint docs/examples/process-notes.yml` (эталон для репо заметок; своих workflow у репо нет) |
 | Хуки харнесса | `python3 .claude/hooks/tests/test_destructive_fs_guard.py` |
 | Всё разом (гигиена) | `pre-commit run --all-files` |
+
+**Чем блок «Приложение» падает не по делу** (за ночь 2026-08-26 на это налетели двое):
+`java` в PATH нет — JDK лежит в `~/.local/java/jdk17` (Temurin 17), отсюда `JAVA_HOME=…` в
+команде. И `local.properties` (`sdk.dir`) не в git — в свежем git-worktree его просто нет,
+Gradle падает на «SDK location not found»; скопировать из основного рабочего дерева:
+`cp ~/code/noteapp/local.properties .`.
 
 Инструменты — лучшие в классе, зафиксировано переносом harness 2026-08-24
 (bd nikitatrubaev-rvw): **ktfmt** (формат, безкомпромиссный), **detekt** (статанализ),
