@@ -65,6 +65,7 @@ fun TasksScreen(
     onRecord: () -> Unit,
     onSettings: () -> Unit,
 ) {
+    val pull = rememberPullToRefreshState()
     Column(Modifier.fillMaxSize()) {
         SectionTabs(Tab.TASKS, TaskFilter.open(tasks, today).size, onTab, onSettings)
         SyncLine(sync, onSettings)
@@ -72,9 +73,10 @@ fun TasksScreen(
             isRefreshing = refreshing,
             onRefresh = onRefresh,
             modifier = Modifier.weight(1f),
+            state = pull,
             indicator = {
                 PullToRefreshDefaults.Indicator(
-                    state = rememberPullToRefreshState(),
+                    state = pull,
                     isRefreshing = refreshing,
                     modifier = Modifier.align(Alignment.TopCenter),
                     containerColor = DocPalette.Paper,

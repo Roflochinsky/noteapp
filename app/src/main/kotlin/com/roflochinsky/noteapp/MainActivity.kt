@@ -177,11 +177,13 @@ class MainActivity : ComponentActivity() {
         val repo = Settings.githubRepo(this)
         val token = Settings.githubToken(this)
         val store =
-            RepoStore(
-                repo = repo,
-                cache = RepoCache(RepoStore.cacheDir(filesDir)),
-                api = token?.let { GithubClient(repo, it) },
-            )
+            withContext(Dispatchers.IO) {
+                RepoStore(
+                    repo = repo,
+                    cache = RepoCache(RepoStore.cacheDir(filesDir)),
+                    api = token?.let { GithubClient(repo, it) },
+                )
+            }
         tasks = store.tasks()
         refreshing = true
         sync = withContext(Dispatchers.IO) { store.refresh() }
