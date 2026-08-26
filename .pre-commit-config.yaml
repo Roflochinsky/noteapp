@@ -18,4 +18,4 @@ repos:
       # Своих workflow у этого репо нет — единственный workflow-файл здесь эталон для РЕПО
       # ЗАМЕТОК, и без явного files хук молча не срабатывал бы ни разу.
       - id: actionlint
-        files: (^\.github/workflows/.*\.ya?ml$|^docs/examples/process-notes\.yml$)
+        files: (^\.github/workflows/.*\.ya?ml$|^docs/examples/.*\.ya?ml$)

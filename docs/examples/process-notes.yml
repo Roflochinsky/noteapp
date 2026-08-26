@@ -1,5 +1,8 @@
-# Эталон workflow для РЕПО ЗАМЕТОК (не этого репо!) — копия рабочего
+# Эталон workflow для РЕПО ЗАМЕТОК (не этого репо!) — пара рабочему
 # Roflochinsky/voice-notes/.github/workflows/process-notes.yml.
+# ВНИМАНИЕ (2026-08-26): эталон ОПЕРЕЖАЕТ боевую копию — здесь промпт v2 (задачи файлами),
+# в боевом репо всё ещё v1. Боевую копию обновляет владелец после утреннего подтверждения;
+# до этого файлы намеренно расходятся. Смоук идёт против Roflochinsky/voice-notes-test.
 # Контракт формата и промпта — docs/specs/2026-08-24-note-format.md и
 # docs/adr/2026-08-26-tasks-as-files.md (схема файла задачи живёт ТОЛЬКО там).
 # ADR-гейт: менять промпт только вместе со спекой; триггер-релей — ADR
@@ -27,9 +30,11 @@ jobs:
   # перезапускает этот же workflow как workflow_dispatch. Рекурсии нет:
   # workflow_dispatch — документированное исключение из защиты GITHUB_TOKEN.
   relay:
-    # ponytail: guard по имени claude[bot] — чтобы пуш самого Action (перенос из
-    # inbox/) не запускал холостой Claude-прогон; сломается, только если сменится
-    # app-имя у claude-code-action.
+    # ponytail: guard — страховка, а не рабочий путь. Пуш обработанных заметок делает
+    # шаг «Пуш заметок с ребейзом» под GITHUB_TOKEN, а такие пуши событий push не
+    # порождают вовсе, так что закрутиться релею нечем. Guard держим на случай, если
+    # claude-code-action снова начнёт пушить сам: его app-токен события порождает.
+    # Подробности — ADR docs/adr/2026-08-25-action-trigger-relay.md.
     if: github.event_name == 'push' && github.triggering_actor != 'claude[bot]'
     runs-on: ubuntu-latest
     steps:
