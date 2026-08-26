@@ -47,13 +47,12 @@ class PushWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                 )
             val path = "inbox/${RawNote.fileName(noteId)}"
             try {
-                GithubClient.putFile(
-                    repo = Settings.githubRepo(applicationContext),
-                    path = path,
-                    content = md,
-                    message = "Заметка ${RawNote.fileName(noteId)}",
-                    token = token,
-                )
+                GithubClient(Settings.githubRepo(applicationContext), token)
+                    .putFile(
+                        path = path,
+                        content = md,
+                        message = "Заметка ${RawNote.fileName(noteId)}",
+                    )
                 File(dir, NotesStore.PUSHED).writeText(path)
                 Log.i(Probe.LOG_TAG, "PROBE:PUSH_OK note=$noteId path=$path")
                 Result.success()

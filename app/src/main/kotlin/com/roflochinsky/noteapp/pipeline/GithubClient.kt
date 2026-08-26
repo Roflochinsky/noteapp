@@ -1,42 +1,55 @@
 package com.roflochinsky.noteapp.pipeline
 
-import android.util.Base64
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.util.Base64
 import org.json.JSONObject
 
-/** GitHub Contents API: один PUT — один новый файл (1 коммит = 1 заметка). */
-object GithubClient {
-    private const val TIMEOUT_MS = 60_000
-    private const val ERR_PREVIEW = 300
+/**
+ * Боевой адаптер порта [GithubApi] поверх GitHub REST (research
+ * `docs/research/github-sync-api.md`). Base64 и кодирование пути — по одному месту на всё (решение
+ * LLD-14): в репо есть кириллические папки `встречи/`, `идеи/`, а `android.util.Base64` в
+ * JVM-юнитах — стаб.
+ *
+ * @param repo вида "owner/name".
+ */
+class GithubClient(private val repo: String, private val token: String) : GithubApi {
 
-    /** @param repo вида "owner/name"; кидает IOException при не-2xx. */
+    override fun readRef(): String =
+        JSONObject(get("$API/$repo/git/ref/heads/main")).getJSONObject("object").getString("sha")
+
+    override fun readTree(commitSha: String): Map<String, String> {
+        val tree =
+            JSONObject(get("$API/$repo/git/trees/$commitSha?recursive=1")).getJSONArray("tree")
+        return (0 until tree.length())
+            .map { tree.getJSONObject(it) }
+            .filter { it.getString("type") == "blob" }
+            .associate { it.getString("path") to it.getString("sha") }
+    }
+
+    override fun readBlob(sha: String): String =
+        decode(JSONObject(get("$API/$repo/git/blobs/$sha")).getString("content"))
+
+    override fun readFile(path: String): String =
+        decode(JSONObject(get("$API/$repo/contents/${encodePath(path)}")).getString("content"))
+
+    /** Один PUT — один новый файл (1 коммит = 1 заметка). */
     @Throws(IOException::class)
-    fun putFile(repo: String, path: String, content: String, message: String, token: String) {
-        val conn =
-            URL("https://api.github.com/repos/$repo/contents/$path").openConnection()
-                as HttpURLConnection
+    fun putFile(path: String, content: String, message: String) {
+        val conn = open("$API/$repo/contents/${encodePath(path)}")
         try {
             conn.requestMethod = "PUT"
             conn.doOutput = true
-            conn.connectTimeout = TIMEOUT_MS
-            conn.readTimeout = TIMEOUT_MS
-            conn.setRequestProperty("Authorization", "Bearer $token")
-            conn.setRequestProperty("Accept", "application/vnd.github+json")
             conn.setRequestProperty("Content-Type", "application/json")
             val body =
                 JSONObject()
                     .put("message", message)
-                    .put("content", Base64.encodeToString(content.toByteArray(), Base64.NO_WRAP))
+                    .put("content", Base64.getEncoder().encodeToString(content.toByteArray()))
                     .toString()
             conn.outputStream.use { it.write(body.toByteArray()) }
-            val code = conn.responseCode
-            if (code !in SUCCESS_RANGE) {
-                val err = conn.errorStream?.bufferedReader()?.readText()?.take(ERR_PREVIEW) ?: ""
-                throw IOException("GitHub HTTP $code: $err")
-            }
+            check(conn)
         } finally {
             conn.disconnect()
         }
@@ -44,45 +57,51 @@ object GithubClient {
 
     /** Ищет обработанный файл по префиксу имени (Action добавил слаг) — контракт HLD-1 v1. */
     @Throws(IOException::class)
-    fun findDonePath(repo: String, fileBase: String, token: String): String? {
-        val json = get("https://api.github.com/repos/$repo/git/trees/main?recursive=1", token)
-        val tree = JSONObject(json).getJSONArray("tree")
-        for (i in 0 until tree.length()) {
-            val path = tree.getJSONObject(i).getString("path")
-            if (!path.startsWith("inbox/") && path.substringAfterLast('/').startsWith(fileBase)) {
-                return path
-            }
+    fun findDonePath(fileBase: String): String? =
+        readTree("main").keys.firstOrNull {
+            !it.startsWith("inbox/") && it.substringAfterLast('/').startsWith(fileBase)
         }
-        return null
-    }
+
+    private fun decode(base64: String): String =
+        String(Base64.getMimeDecoder().decode(base64)) // ответы GitHub приходят с переносами строк
 
     @Throws(IOException::class)
-    fun readFile(repo: String, path: String, token: String): String {
-        val enc = path.split("/").joinToString("/") { URLEncoder.encode(it, "UTF-8") }
-        val json = get("https://api.github.com/repos/$repo/contents/$enc", token)
-        val o = JSONObject(json)
-        return String(
-            android.util.Base64.decode(o.getString("content"), android.util.Base64.DEFAULT)
-        )
-    }
-
-    @Throws(IOException::class)
-    private fun get(url: String, token: String): String {
-        val conn = URL(url).openConnection() as HttpURLConnection
+    private fun get(url: String): String {
+        val conn = open(url)
         try {
-            conn.connectTimeout = TIMEOUT_MS
-            conn.readTimeout = TIMEOUT_MS
-            conn.setRequestProperty("Authorization", "Bearer $token")
-            conn.setRequestProperty("Accept", "application/vnd.github+json")
-            val code = conn.responseCode
-            if (code !in SUCCESS_RANGE) throw IOException("GitHub HTTP $code")
+            check(conn)
             return conn.inputStream.bufferedReader().readText()
         } finally {
             conn.disconnect()
         }
     }
 
-    private const val HTTP_OK_MIN = 200
-    private const val HTTP_OK_MAX = 299
-    private val SUCCESS_RANGE = HTTP_OK_MIN..HTTP_OK_MAX
+    private fun open(url: String): HttpURLConnection {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        conn.connectTimeout = TIMEOUT_MS
+        conn.readTimeout = TIMEOUT_MS
+        conn.setRequestProperty("Authorization", "Bearer $token")
+        conn.setRequestProperty("Accept", "application/vnd.github+json")
+        return conn
+    }
+
+    @Throws(IOException::class)
+    private fun check(conn: HttpURLConnection) {
+        val code = conn.responseCode
+        if (code !in SUCCESS_RANGE) {
+            val err = conn.errorStream?.bufferedReader()?.readText()?.take(ERR_PREVIEW).orEmpty()
+            throw GithubHttpException(code, "GitHub HTTP $code: $err")
+        }
+    }
+
+    private companion object {
+        const val API = "https://api.github.com/repos"
+        const val TIMEOUT_MS = 60_000
+        const val ERR_PREVIEW = 300
+        val SUCCESS_RANGE = 200..299
+
+        /** Пробел в пути — `%20`, не `+`; кириллица — UTF-8-проценты. */
+        fun encodePath(path: String): String =
+            path.split("/").joinToString("/") { URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
+    }
 }

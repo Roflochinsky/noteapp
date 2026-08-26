@@ -85,16 +85,14 @@ fun DetailScreen(noteId: String, onBack: () -> Unit) {
                 return@withContext
             }
             runCatching {
+                    val github = GithubClient(Settings.githubRepo(context), token)
                     val base = RawNote.fileName(noteId).removeSuffix(".md")
-                    val path = GithubClient.findDonePath(Settings.githubRepo(context), base, token)
+                    val path = github.findDonePath(base)
                     donePath = path
                     if (path == null) {
                         doneState = "саммари готовится…"
                     } else {
-                        done =
-                            DoneNoteParser.parse(
-                                GithubClient.readFile(Settings.githubRepo(context), path, token)
-                            )
+                        done = DoneNoteParser.parse(github.readFile(path))
                         if (done == null) doneState = "саммари готовится…"
                     }
                 }

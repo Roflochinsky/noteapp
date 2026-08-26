@@ -23,6 +23,7 @@ object DocPalette {
     val Amber = Color(0xFF8A5A0F)
     val Green = Color(0xFF2E7D53)
     val Nav = Color(0xFF243B63)
+    val OnNav = Color(0xFFF4F7FB)
 }
 
 private val scheme =

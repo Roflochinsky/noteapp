@@ -17,13 +17,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -41,21 +37,14 @@ import java.time.format.DateTimeFormatter
 fun FeedScreen(
     notes: List<NotesStore.Note>,
     isRecording: Boolean,
+    tasksCount: Int,
+    onTab: (Tab) -> Unit,
     onNote: (String) -> Unit,
     onRecord: () -> Unit,
     onSettings: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 22.dp, end = 10.dp, top = 14.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("Заметки", style = MaterialTheme.typography.headlineSmall)
-            IconButton(onClick = onSettings) {
-                Icon(Icons.Filled.Settings, "Настройки", tint = DocPalette.Mut)
-            }
-        }
+        SectionTabs(Tab.NOTES, tasksCount, onTab, onSettings)
         if (notes.isEmpty()) {
             EmptyState()
         } else {
@@ -149,8 +138,9 @@ private fun NoteItem(note: NotesStore.Note, onClick: () -> Unit) {
     }
 }
 
+/** Панель записи одна на оба раздела: идущая запись важнее любой другой нижней кнопки. */
 @Composable
-private fun RecordBar(isRecording: Boolean, onRecord: () -> Unit) {
+internal fun RecordBar(isRecording: Boolean, onRecord: () -> Unit) {
     Column(
         modifier =
             Modifier.fillMaxWidth().padding(22.dp, 12.dp, 22.dp, 8.dp).navigationBarsPadding(),

@@ -52,6 +52,9 @@ android {
 
 kotlin { jvmToolchain(17) }
 
+// Вывод смоука (RepoSmokeTest) должен быть виден в консоли гейта.
+tasks.withType<Test>().configureEach { testLogging { showStandardStreams = true } }
+
 ktfmt { kotlinLangStyle() }
 
 detekt {

@@ -27,28 +27,43 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.roflochinsky.noteapp.pipeline.GithubClient
 import com.roflochinsky.noteapp.pipeline.NotesStore
+import com.roflochinsky.noteapp.pipeline.RepoCache
+import com.roflochinsky.noteapp.pipeline.RepoStore
 import com.roflochinsky.noteapp.pipeline.Settings
+import com.roflochinsky.noteapp.pipeline.SyncStatus
+import com.roflochinsky.noteapp.pipeline.TaskFile
 import com.roflochinsky.noteapp.ui.DetailScreen
 import com.roflochinsky.noteapp.ui.DocTheme
 import com.roflochinsky.noteapp.ui.FeedScreen
 import com.roflochinsky.noteapp.ui.OnboardStep
 import com.roflochinsky.noteapp.ui.OnboardingScreen
 import com.roflochinsky.noteapp.ui.RecordSheet
+import com.roflochinsky.noteapp.ui.Tab
+import com.roflochinsky.noteapp.ui.TasksScreen
+import java.time.LocalDate
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
     private sealed interface Screen {
         data object Onboarding : Screen
 
-        data object Feed : Screen
+        /** Вкладка — часть состояния экрана: Back с «Задач» возвращает на «Заметки». */
+        data class Feed(val tab: Tab = Tab.NOTES) : Screen
 
         data class Detail(val noteId: String) : Screen
     }
 
-    private var screen by mutableStateOf<Screen>(Screen.Feed)
+    private var screen by mutableStateOf<Screen>(Screen.Feed())
     private var notes by mutableStateOf(listOf<NotesStore.Note>())
+    private var tasks by mutableStateOf(listOf<TaskFile.Task>())
+    private var sync by mutableStateOf(SyncStatus.OK)
+    private var refreshing by mutableStateOf(false)
     private var recording by mutableStateOf(false)
     private var sheetOpen by mutableStateOf(false)
     private var dialog by mutableStateOf<String?>(null) // "deepgram" | "github"
@@ -82,6 +97,8 @@ class MainActivity : ComponentActivity() {
 
     @androidx.compose.runtime.Composable
     private fun Root() {
+        val scope = androidx.compose.runtime.rememberCoroutineScope()
+        // Секундный цикл — только локальные записи и состояние диктофона; репо в него не мешаем.
         LaunchedEffect(Unit) {
             while (true) {
                 notes = NotesStore.list(this@MainActivity)
@@ -92,29 +109,43 @@ class MainActivity : ComponentActivity() {
                 delay(POLL_MS)
             }
         }
+        LaunchedEffect(Unit) { refreshRepo() }
         when (val s = screen) {
-            is Screen.Onboarding -> OnboardingScreen(steps = steps()) { screen = Screen.Feed }
+            is Screen.Onboarding -> OnboardingScreen(steps = steps()) { screen = Screen.Feed() }
             is Screen.Feed ->
-                FeedScreen(
-                    notes = notes,
-                    isRecording = recording,
-                    onNote = { screen = Screen.Detail(it) },
-                    onRecord = {
-                        if (recording) {
-                            sheetOpen = true
-                        } else {
-                            startForegroundService(RecordingService.toggleIntent(this@MainActivity))
-                        }
-                    },
-                    onSettings = { screen = Screen.Onboarding },
-                )
+                when (s.tab) {
+                    Tab.NOTES ->
+                        FeedScreen(
+                            notes = notes,
+                            isRecording = recording,
+                            tasksCount = tasks.count { !it.isDone },
+                            onTab = { screen = Screen.Feed(it) },
+                            onNote = { screen = Screen.Detail(it) },
+                            onRecord = ::onRecord,
+                            onSettings = { screen = Screen.Onboarding },
+                        )
+                    Tab.TASKS -> {
+                        BackHandler { screen = Screen.Feed(Tab.NOTES) }
+                        TasksScreen(
+                            tasks = tasks,
+                            today = LocalDate.now(),
+                            sync = sync,
+                            refreshing = refreshing,
+                            isRecording = recording,
+                            onTab = { screen = Screen.Feed(it) },
+                            onRefresh = { scope.launch { refreshRepo() } },
+                            onRecord = ::onRecord,
+                            onSettings = { screen = Screen.Onboarding },
+                        )
+                    }
+                }
             is Screen.Detail -> {
-                BackHandler { screen = Screen.Feed }
-                DetailScreen(noteId = s.noteId, onBack = { screen = Screen.Feed })
+                BackHandler { screen = Screen.Feed() }
+                DetailScreen(noteId = s.noteId, onBack = { screen = Screen.Feed() })
             }
         }
         if (screen is Screen.Onboarding && setupComplete()) {
-            BackHandler { screen = Screen.Feed }
+            BackHandler { screen = Screen.Feed() }
         }
         if (sheetOpen && recording) {
             RecordSheet(
@@ -134,6 +165,28 @@ class MainActivity : ComponentActivity() {
                     Settings.setGithubToken(this@MainActivity, it)
                 }
         }
+    }
+
+    private fun onRecord() {
+        if (recording) sheetOpen = true
+        else startForegroundService(RecordingService.toggleIntent(this))
+    }
+
+    /** Кэш рисуется мгновенно, сеть догоняет фоном (решение LLD-12). */
+    private suspend fun refreshRepo() {
+        val repo = Settings.githubRepo(this)
+        val token = Settings.githubToken(this)
+        val store =
+            RepoStore(
+                repo = repo,
+                cache = RepoCache(RepoStore.cacheDir(filesDir)),
+                api = token?.let { GithubClient(repo, it) },
+            )
+        tasks = store.tasks()
+        refreshing = true
+        sync = withContext(Dispatchers.IO) { store.refresh() }
+        tasks = store.tasks()
+        refreshing = false
     }
 
     private fun sendAction(action: String) {
