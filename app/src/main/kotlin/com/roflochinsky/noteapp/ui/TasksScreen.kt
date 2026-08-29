@@ -114,8 +114,10 @@ private fun TaskList(tasks: List<TaskFile.Task>, today: LocalDate) {
             item(key = "prio-$priority") { PriorityRubric(priority) }
             itemsIndexed(group, key = { _, task -> task.path }) { i, task ->
                 // Комп: `.trow + .trow{border-top}` — линия между соседями, после последней нет.
+                // Линия full-bleed: в компе border-top висит на самой строке с её паддингом,
+                // и `DESIGN.md` требует «full-bleed строки, разделённые hairline 1px».
                 if (i > 0) {
-                    HorizontalDivider(Modifier.padding(horizontal = 22.dp), color = DocPalette.Line)
+                    HorizontalDivider(color = DocPalette.Line)
                 }
                 TaskRow(task, today)
             }
@@ -127,10 +129,7 @@ private fun TaskList(tasks: List<TaskFile.Task>, today: LocalDate) {
             if (doneOpen) {
                 itemsIndexed(done, key = { _, task -> "done-${task.path}" }) { i, task ->
                     if (i > 0) {
-                        HorizontalDivider(
-                            Modifier.padding(horizontal = 22.dp),
-                            color = DocPalette.Line,
-                        )
+                        HorizontalDivider(color = DocPalette.Line)
                     }
                     TaskRow(task, today)
                 }
@@ -279,23 +278,28 @@ private fun OverdueLabel(due: LocalDate, today: LocalDate) {
 
 @Composable
 private fun DoneFold(count: Int, open: Boolean, onToggle: () -> Unit) {
-    Row(
-        modifier =
-            Modifier.fillMaxWidth()
-                .clickable(onClick = onToggle)
-                .padding(horizontal = 22.dp)
-                .height(TOUCH.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Icon(
-            if (open) Icons.Filled.KeyboardArrowDown
-            else Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            tint = DocPalette.Mut,
-            modifier = Modifier.size(18.dp),
-        )
-        Text("Сделано за месяц · $count", style = MaterialTheme.typography.bodySmall)
+    Column {
+        // Комп: `.fold{border-top}` — над рубрикой «Сделано» линия есть всегда, в отличие от
+        // строк задач (там линия только между соседями).
+        HorizontalDivider(color = DocPalette.Line)
+        Row(
+            modifier =
+                Modifier.fillMaxWidth()
+                    .clickable(onClick = onToggle)
+                    .padding(horizontal = 22.dp)
+                    .height(TOUCH.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(
+                if (open) Icons.Filled.KeyboardArrowDown
+                else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = DocPalette.Mut,
+                modifier = Modifier.size(18.dp),
+            )
+            Text("Сделано за месяц · $count", style = MaterialTheme.typography.bodySmall)
+        }
     }
 }
 
