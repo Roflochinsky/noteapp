@@ -2,9 +2,11 @@ package com.roflochinsky.noteapp.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
@@ -61,7 +63,10 @@ private fun TabTitle(title: String, active: Boolean, onClick: () -> Unit) {
     )
 }
 
-/** Единственная поверхность для ошибок синка: строка под шапкой, без диалогов и тостов. */
+/**
+ * Единственная поверхность для ошибок синка: строка под шапкой, без диалогов и тостов. Живёт на
+ * обеих вкладках — первый синк уходит на «Заметках», и молчать об отказе до переключения нельзя.
+ */
 @Composable
 fun SyncLine(sync: SyncStatus, onSettings: () -> Unit) {
     val text =
@@ -72,15 +77,23 @@ fun SyncLine(sync: SyncStatus, onSettings: () -> Unit) {
             SyncStatus.NO_ACCESS -> "нет доступа к репо"
             SyncStatus.RATE_LIMIT -> "лимит GitHub исчерпан"
         }
-    Text(
-        text,
-        style =
-            MaterialTheme.typography.bodySmall.copy(
-                color = if (sync == SyncStatus.OFFLINE) DocPalette.Mut else DocPalette.Amber
-            ),
+    Box(
+        // Строка кликабельна (тап ведёт в настройки) — значит тач-таргет 48dp, вердикт UX.
         modifier =
             Modifier.fillMaxWidth()
                 .clickable(enabled = sync == SyncStatus.NO_TOKEN, onClick = onSettings)
+                .heightIn(min = TOUCH.dp)
                 .padding(horizontal = 22.dp, vertical = 8.dp),
-    )
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Text(
+            text,
+            style =
+                MaterialTheme.typography.bodySmall.copy(
+                    color = if (sync == SyncStatus.OFFLINE) DocPalette.Mut else DocPalette.Amber
+                ),
+        )
+    }
 }
+
+private const val TOUCH = 48

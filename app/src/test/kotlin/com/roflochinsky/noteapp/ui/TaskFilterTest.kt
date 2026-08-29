@@ -55,6 +55,17 @@ class TaskFilterTest {
         )
     }
 
+    /** Вердикт UX: «Задач пока нет» и рубрика «Сделано» на одном экране — враньё экрана. */
+    @Test
+    fun `пусто — только когда нет ни открытых, ни свежесделанных`() {
+        assertTrue(TaskFilter.nothingToShow(emptyList(), today))
+        assertFalse(TaskFilter.nothingToShow(listOf(task("Открытая")), today))
+        val fresh = task("Сделана вчера", status = TaskFile.STATUS_DONE, done = "2026-08-25")
+        assertFalse(TaskFilter.nothingToShow(listOf(fresh), today))
+        val stale = task("Сделана зимой", status = TaskFile.STATUS_DONE, done = "2026-01-01")
+        assertTrue(TaskFilter.nothingToShow(listOf(stale), today))
+    }
+
     @Test
     fun `открытые — это всё, что не done, включая в работе`() {
         val tasks =

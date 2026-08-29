@@ -18,13 +18,9 @@ enum class SyncStatus {
  * ponytail: чтение полное (ref + tree + изменившиеся блобы) — репо личное и маленькое; ETag,
  * `compare` и дельта живут в срезе Н7, раньше они экономят то, чего никто не тратит.
  */
-class RepoStore(
-    private val repo: String,
-    private val cache: RepoCache,
-    private val api: GithubApi?,
-) {
+class RepoStore(private val cache: RepoCache, private val api: GithubApi?) {
 
-    private var snapshot = cache.load(repo)
+    private var snapshot = cache.load()
 
     /** Задачи из кэша — рисуются мгновенно, без сети (решение LLD-12). */
     fun tasks(): List<TaskFile.Task> =
@@ -45,7 +41,7 @@ class RepoStore(
                             ?: RepoCache.Entry(sha, api.readBlob(sha))
                     }
             snapshot = RepoCache.Snapshot(commit, files)
-            cache.save(repo, snapshot)
+            cache.save(snapshot)
             SyncStatus.OK
         } catch (e: GithubHttpException) {
             status(e)

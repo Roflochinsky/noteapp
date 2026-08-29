@@ -45,7 +45,8 @@ class RepoStoreTest {
             put("projects.md", "- tgsum — суммаризатор")
         }
 
-    private fun store(dir: java.io.File, api: GithubApi?) = RepoStore(repo, RepoCache(dir), api)
+    private fun store(dir: java.io.File, api: GithubApi?) =
+        RepoStore(RepoCache(dir, repo, "ghp_test"), api)
 
     @Test
     fun `обновление приносит задачи из репо`() {
@@ -118,7 +119,7 @@ class RepoStoreTest {
     fun `не-IOException не роняет экран, а становится офлайном`() {
         val api = FakeGithubApi()
         api.put("tasks/a.md", "---\ntitle: A\n---\n")
-        val store = RepoStore("r/n", RepoCache(tmp.newFolder()), api)
+        val store = RepoStore(RepoCache(tmp.newFolder(), "r/n", "ghp_test"), api)
         // 200 с не-JSON телом (кэптив-портал, HTML от CDN): org.json кидает JSONException, а она
         // IOException не родня — раньше это улетало из корутины и убивало приложение.
         api.fail = org.json.JSONException("A JSONObject text must begin with '{'")

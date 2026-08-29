@@ -34,6 +34,13 @@ object TaskFilter {
     fun doneCount(tasks: List<TaskFile.Task>, today: LocalDate): Int =
         done(tasks, today).count { it.done != null }
 
+    /**
+     * Показывать нечего вовсе. Закрытые в окне «Сделано за месяц» — тоже содержимое: при них «Задач
+     * пока нет» было бы враньём экрана (вердикт UX).
+     */
+    fun nothingToShow(tasks: List<TaskFile.Task>, today: LocalDate): Boolean =
+        openCount(tasks) == 0 && done(tasks, today).isEmpty()
+
     fun isOverdue(task: TaskFile.Task, today: LocalDate): Boolean =
         !task.isDone && task.due != null && task.due.isBefore(today)
 

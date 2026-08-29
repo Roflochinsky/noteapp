@@ -1,23 +1,34 @@
 package com.roflochinsky.noteapp.pipeline
 
 import java.io.File
+import java.security.MessageDigest
 import org.json.JSONObject
 
 /**
  * Локальный кэш репо заметок: тексты, карта путь→blobSha и коммит, на котором мы синхронизированы
- * (решение LLD-13). Один json, запись через temp+rename. Битый файл, чужая версия или смена репо —
- * холодный старт, а не исключение: кэш всегда восстановим из репо.
+ * (решение LLD-13). Один json, запись через temp+rename. Битый файл, чужая версия, смена репо или
+ * токена — холодный старт, а не исключение: кэш всегда восстановим из репо.
+ *
+ * Личность кэша (репо + токен) задаётся конструктором: снимок нельзя прочитать, не назвав, чей он —
+ * иначе данные, прочитанные отозванным токеном, остаются на экране (решение LLD-23). Сам токен в
+ * файл не пишется, только его отпечаток.
  */
-class RepoCache(private val dir: File) {
+class RepoCache(private val dir: File, private val repo: String, token: String?) {
+
+    private val tokenHash = fingerprint(token)
 
     data class Entry(val sha: String, val text: String)
 
     data class Snapshot(val commitSha: String = "", val files: Map<String, Entry> = emptyMap())
 
-    fun load(repo: String): Snapshot =
+    fun load(): Snapshot =
         runCatching {
                 val json = JSONObject(file().readText())
-                if (json.getInt("version") != VERSION || json.getString("repo") != repo) {
+                if (
+                    json.getInt("version") != VERSION ||
+                        json.getString("repo") != repo ||
+                        json.optString("tokenHash") != tokenHash
+                ) {
                     return Snapshot()
                 }
                 val files = json.getJSONObject("files")
@@ -32,7 +43,7 @@ class RepoCache(private val dir: File) {
             }
             .getOrDefault(Snapshot())
 
-    fun save(repo: String, snapshot: Snapshot) {
+    fun save(snapshot: Snapshot) {
         val files = JSONObject()
         snapshot.files.forEach { (path, e) ->
             files.put(path, JSONObject().put("sha", e.sha).put("text", e.text))
@@ -41,6 +52,7 @@ class RepoCache(private val dir: File) {
             JSONObject()
                 .put("version", VERSION)
                 .put("repo", repo)
+                .put("tokenHash", tokenHash)
                 .put("commit", snapshot.commitSha)
                 .put("files", files)
         dir.mkdirs()
@@ -57,5 +69,16 @@ class RepoCache(private val dir: File) {
     private companion object {
         const val VERSION = 1
         const val NAME = "repo.json"
+        const val HEX = "%02x"
+
+        /** Отпечаток токена: смену видно, сам токен по нему не восстановить. */
+        fun fingerprint(token: String?): String =
+            if (token.isNullOrEmpty()) {
+                ""
+            } else {
+                MessageDigest.getInstance("SHA-256").digest(token.toByteArray()).joinToString("") {
+                    HEX.format(it)
+                }
+            }
     }
 }

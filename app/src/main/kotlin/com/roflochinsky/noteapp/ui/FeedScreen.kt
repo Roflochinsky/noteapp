@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.roflochinsky.noteapp.pipeline.NotesStore
+import com.roflochinsky.noteapp.pipeline.SyncStatus
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -38,6 +39,7 @@ fun FeedScreen(
     notes: List<NotesStore.Note>,
     isRecording: Boolean,
     tasksCount: Int,
+    sync: SyncStatus,
     onTab: (Tab) -> Unit,
     onNote: (String) -> Unit,
     onRecord: () -> Unit,
@@ -45,6 +47,8 @@ fun FeedScreen(
 ) {
     Column(Modifier.fillMaxSize()) {
         SectionTabs(Tab.NOTES, tasksCount, onTab, onSettings)
+        // Первый синк уходит на этой вкладке — отказ («нет токена», «нет доступа») виден здесь же.
+        SyncLine(sync, onSettings)
         if (notes.isEmpty()) {
             EmptyState()
         } else {

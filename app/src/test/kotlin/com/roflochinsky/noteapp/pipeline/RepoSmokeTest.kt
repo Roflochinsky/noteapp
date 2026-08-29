@@ -27,7 +27,7 @@ class RepoSmokeTest {
     fun `читает живой тестовый репо и разбирает задачи`() {
         val token = System.getenv("NOTEAPP_SMOKE_TOKEN").orEmpty()
         assumeTrue("нет NOTEAPP_SMOKE_TOKEN — смоук пропущен", token.isNotEmpty())
-        val store = RepoStore(repo, RepoCache(tmp.newFolder()), GithubClient(repo, token))
+        val store = RepoStore(RepoCache(tmp.newFolder(), repo, token), GithubClient(repo, token))
         assertEquals(SyncStatus.OK, store.refresh())
         val today = LocalDate.now()
         val tasks = store.tasks()

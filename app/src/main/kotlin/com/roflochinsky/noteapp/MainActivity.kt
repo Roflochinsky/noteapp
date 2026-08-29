@@ -122,6 +122,7 @@ class MainActivity : ComponentActivity() {
                             notes = notes,
                             isRecording = recording,
                             tasksCount = TaskFilter.openCount(tasks),
+                            sync = sync,
                             onTab = { screen = Screen.Feed(it) },
                             onNote = { screen = Screen.Detail(it) },
                             onRecord = ::onRecord,
@@ -211,8 +212,7 @@ class MainActivity : ComponentActivity() {
             }
         return withContext(Dispatchers.IO) {
                 RepoStore(
-                    repo = repo,
-                    cache = RepoCache(RepoStore.cacheDir(filesDir)),
+                    cache = RepoCache(RepoStore.cacheDir(filesDir), repo, token),
                     api = token?.let { GithubClient(repo, it) },
                 )
             }

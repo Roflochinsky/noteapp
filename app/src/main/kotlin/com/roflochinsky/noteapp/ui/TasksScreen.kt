@@ -19,7 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -104,19 +104,20 @@ private fun TaskList(tasks: List<TaskFile.Task>, today: LocalDate) {
     val done = TaskFilter.done(tasks, today)
     var doneOpen by rememberSaveable { mutableStateOf(false) }
     LazyColumn(Modifier.fillMaxSize()) {
-        // Пусто ровно тогда, когда нет ОТКРЫТЫХ задач. Фильтров в Н1 не существует (они в Н3),
-        // поэтому «под этот фильтр ничего не подошло» сказать нечем — это была ложь экрана.
-        if (groups.isEmpty()) {
+        // Пусто ровно тогда, когда показывать нечего вовсе: при свёрнутой рубрике «Сделано»
+        // «Задач пока нет» было бы враньём экрана. Фильтров в Н1 нет (они в Н3), поэтому
+        // «под этот фильтр ничего не подошло» сказать нечем.
+        if (TaskFilter.nothingToShow(tasks, today)) {
             item { EmptyTasks() }
         }
         groups.forEach { (priority, group) ->
             item(key = "prio-$priority") { PriorityRubric(priority) }
-            items(group, key = { it.path }) { task ->
+            itemsIndexed(group, key = { _, task -> task.path }) { i, task ->
+                // Комп: `.trow + .trow{border-top}` — линия между соседями, после последней нет.
+                if (i > 0) {
+                    HorizontalDivider(Modifier.padding(horizontal = 22.dp), color = DocPalette.Line)
+                }
                 TaskRow(task, today)
-                HorizontalDivider(
-                    color = DocPalette.Line,
-                    modifier = Modifier.padding(horizontal = 22.dp),
-                )
             }
         }
         if (done.isNotEmpty()) {
@@ -124,12 +125,14 @@ private fun TaskList(tasks: List<TaskFile.Task>, today: LocalDate) {
                 DoneFold(TaskFilter.doneCount(tasks, today), doneOpen) { doneOpen = !doneOpen }
             }
             if (doneOpen) {
-                items(done, key = { "done-${it.path}" }) { task ->
+                itemsIndexed(done, key = { _, task -> "done-${task.path}" }) { i, task ->
+                    if (i > 0) {
+                        HorizontalDivider(
+                            Modifier.padding(horizontal = 22.dp),
+                            color = DocPalette.Line,
+                        )
+                    }
                     TaskRow(task, today)
-                    HorizontalDivider(
-                        color = DocPalette.Line,
-                        modifier = Modifier.padding(horizontal = 22.dp),
-                    )
                 }
             }
         }
