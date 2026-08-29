@@ -48,6 +48,10 @@ android {
   lint { abortOnError = true }
 
   buildFeatures { compose = true }
+
+  // Тесты Compose гоняются Robolectric'ом в testDebugUnitTest — ему нужны настоящие ресурсы
+  // и манифест, иначе тема и ComponentActivity не поднимаются.
+  testOptions { unitTests { isIncludeAndroidResources = true } }
 }
 
 kotlin { jvmToolchain(17) }
@@ -79,4 +83,10 @@ dependencies {
   testImplementation("junit:junit:4.13.2")
   // org.json есть в Android SDK, но в JVM-юнитах стабы android.jar кидают — нужна реальная либа.
   testImplementation("org.json:json:20240303")
+  // Экраны проверяются на JVM: Robolectric поднимает Android, compose ui-test — дерево семантики.
+  // androidTest не берём — он требует эмулятора, а гейт офлайновый и без устройства.
+  testImplementation(platform("androidx.compose:compose-bom:2024.12.01"))
+  testImplementation("androidx.compose.ui:ui-test-junit4")
+  testImplementation("org.robolectric:robolectric:4.14.1")
+  debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

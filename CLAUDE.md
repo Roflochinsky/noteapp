@@ -27,6 +27,13 @@ Gradle падает на «SDK location not found»; скопировать из
 **Android Lint**, **actionlint** (workflows). Версии пинить в Gradle и pre-commit синхронно —
 разъехавшиеся версии заставляют хук и CI форматировать по-разному (прецедент workwatch).
 
+**Тесты экранов** — Robolectric + `compose ui-test`, в общем `testDebugUnitTest`, гоняются тем же
+`bin/gate` (`androidTest` не берём: он требует эмулятора, а гейт офлайновый и без устройства).
+Кладутся рядом с экраном в `app/src/test/kotlin/.../ui/`; образец и грабли — `TasksScreenTest.kt`
+(главные: высоту, которую задаёт текст, у Robolectric мерить нельзя — своего шрифта нет, строки
+выходят вдвое выше устройских, поэтому тач-таргет проверяется только там, где высота задана
+`Modifier.height`, а остальное — через семантику: клик, роль, описание).
+
 **Гейт зовётся через `bin/gate`, а не `./gradlew` напрямую.** `bin/gate` — быстрый набор
 (`ktfmtCheck detekt testDebugUnitTest`), `bin/gate --full` — полный с `lint` и APK,
 `bin/gate <задачи>` — свои задачи. Обёртка снимает `JAVA_HOME` и `local.properties`,
