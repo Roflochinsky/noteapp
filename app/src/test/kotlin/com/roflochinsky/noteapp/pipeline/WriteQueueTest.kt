@@ -108,6 +108,27 @@ class WriteQueueTest {
         }
     }
 
+    /**
+     * Повтор после 409 — та же потеря правки, что и снятие: пока PUT был в полёте, владелец
+     * поправил то же поле, склейка положила правку В ТОТ ЖЕ файл журнала. Записать поверх неё
+     * старую операцию нельзя — свежая правка иначе исчезает молча.
+     */
+    @Test
+    fun `повтор после конфликта не затирает правку, склеенную во время отправки`() {
+        val dir = tmp.newFolder()
+        val q = queue(dir)
+        val sent = q.enqueue(path, Edit.SetField("priority", "P1"))
+        q.enqueue(path, Edit.SetField("priority", "P3"))
+        q.retry(sent)
+        val revived = queue(dir).pending()
+        assertEquals(
+            "повтор затёр правку владельца",
+            listOf(Edit.SetField("priority", "P3")),
+            revived.map { it.edit },
+        )
+        assertEquals(listOf(0), revived.map { it.attempt })
+    }
+
     @Test
     fun `битый файл журнала не роняет очередь`() {
         val dir = tmp.newFolder()

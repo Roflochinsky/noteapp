@@ -29,8 +29,16 @@ class RepoStore(
     private val cache: RepoCache,
     private val api: GithubApi?,
     private val queue: WriteQueue = WriteQueue(File(cache.dir, QUEUE)),
-    private val today: LocalDate = LocalDate.now(),
+    private val clock: () -> LocalDate = LocalDate::now,
 ) {
+
+    /**
+     * Сегодняшняя дата берётся в момент использования, а не в конструктор: фасад один на процесс
+     * (`shared()`) и живёт дольше суток. Замороженная дата дала бы задаче, заведённой после
+     * полуночи, вчерашнее имя файла и вчерашний `created:`, а экран рисовал бы `LocalDate.now()`.
+     */
+    private val today: LocalDate
+        get() = clock()
 
     /** Итог одной отправки: очередь пуста, есть ещё, ждём сети/лимита, наш баг. */
     enum class Push {

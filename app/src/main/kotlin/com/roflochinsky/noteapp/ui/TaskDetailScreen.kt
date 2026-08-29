@@ -4,6 +4,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,6 +56,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -607,22 +610,34 @@ private fun ActionButton(
  * кликабелен ровно он: 12dp иконка плюс отступ. Тап по тексту тег не убивает (подтверждения у такой
  * мелочи быть не должно).
  *
- * Мазок вокруг крестика добирает near-hit Compose (см. [TOUCH]) — и это лучше прежней прозрачной
- * полосы 48dp: полоса была НАСТОЯЩИМ попаданием и при переносе тегов на второй ряд молча сносила
- * тег из первого. Near-hit так не может: настоящее попадание всегда сильнее, а между двумя
- * промахами побеждает ближайший.
+ * Мазок вокруг крестика добирает near-hit Compose (см. [TOUCH]) — палец попадает по 12dp иконке. Но
+ * мазок симметричен по ОБЕИМ осям (`max(0, (48 − 12)/2)` = 18dp на сторону), поэтому у короткого
+ * тега (`#a`, `#дом`) он накрывает и имя: без конкурента тап по имени молча сносил бы тег.
+ * Конкурент — сам чип: он глотает тап [pointerInput]-ом, и это НАСТОЯЩЕЕ попадание, которое в своей
+ * корзине `isInLayer` сильнее любого near-hit. Крестик лежит глубже чипа, поэтому тап по нему
+ * по-прежнему достаётся крестику. Видимая геометрия не меняется ни на dp — глушилка стоит до
+ * `padding`, так что накрывает ровно нарисованный чип.
  *
- * ponytail: остаточный риск — тап по левому краю чипа второго ряда, если прямо над ним стоит
- * крестик первого; near-hit-мазок крестика (18dp по вертикали) туда дотягивается, а текст чипа
- * кликабельным делать нельзя (тогда тег сносился бы тапом по имени). Разводить ряды вертикально
- * комп не даёт (`spacedBy(2.dp)`); лечится только вторым рядом, которого у одной задачи почти не
- * бывает.
+ * `clickable` на чипе для этого не годится: он объявил бы чип кнопкой для TalkBack и дал бы рипл
+ * там, где тап ничего не делает.
+ *
+ * Крестику мазок остаётся снаружи чипа: по вертикали — вся строка поля (48dp, соседних настоящих
+ * попаданий там нет), по горизонтали — 6dp зазора до следующего чипа. Внутри чипа зона крестика
+ * равна нарисованной, и это правильная цена: удаление тега на деталке ничем не отменяется, целиться
+ * в видимый крестик честнее, чем сносить тег мазком по имени.
+ *
+ * ponytail: остаточный риск — 2dp зазора `spacedBy` между рядами тегов: настоящего попадания в нём
+ * нет, и тап туда достаётся ближайшему near-hit, то есть крестику ряда выше. Сам чип второго ряда
+ * от этого закрыт — глушилка и у него. Разводить ряды комп не даёт (`bd nikitatrubaev-0rk.18`).
  */
 @Composable
 private fun RemovableTag(tag: String, onRemove: () -> Unit) {
     Row(
         modifier =
             Modifier.background(DocPalette.Paper2, RoundedCornerShape(8.dp))
+                .pointerInput(Unit) {
+                    awaitEachGesture { awaitFirstDown(requireUnconsumed = false) }
+                }
                 .padding(start = 10.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

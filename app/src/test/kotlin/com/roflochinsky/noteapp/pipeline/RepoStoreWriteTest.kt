@@ -45,7 +45,7 @@ class RepoStoreWriteTest {
     private fun api() = FakeGithubApi().apply { put(path, fix) }
 
     private fun store(dir: java.io.File, api: GithubApi?) =
-        RepoStore(RepoCache(dir, repo, "token"), api, today = today)
+        RepoStore(RepoCache(dir, repo, "token"), api, clock = { today })
 
     private fun ready(api: GithubApi?): RepoStore =
         store(tmp.newFolder(), api).also { it.refresh() }
@@ -66,6 +66,26 @@ class RepoStoreWriteTest {
         assertTrue("путь должен ждать отправки", path in store.view().pending)
         assertEquals(0, api.writeCalls)
         assertFalse(api.text(path)!!.contains("status: done"))
+    }
+
+    /**
+     * Фасад один на процесс (`shared()`) и живёт дольше суток: приложение, открытое до полуночи,
+     * после неё обязано ставить свежую дату — ту же, что рисует экран. Замороженная конструктором
+     * дата дала бы новой задаче вчерашнее имя файла, вчерашний `created:` и вчерашний `done:`.
+     */
+    @Test
+    fun `после полуночи дата новая, а не та, с которой открыли приложение`() {
+        var now = today
+        val store =
+            RepoStore(RepoCache(tmp.newFolder(), repo, "token"), api(), clock = { now }).also {
+                it.refresh()
+            }
+        now = today.plusDays(1)
+        val created = store.create("Задача после полуночи")
+        assertTrue("имя файла со вчерашней датой: $created", created.contains(now.toString()))
+        assertEquals(now, store.view().tasks.single { it.path == created }.created)
+        store.setStatus(path, TaskFile.STATUS_DONE)
+        assertEquals(now, task(store).done)
     }
 
     @Test
