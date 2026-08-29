@@ -28,8 +28,15 @@ class FakeGithubApi(
     /** «Пока мы правили, в git приехало своё» — вызывается тестом перед ответом на запись. */
     var onWrite: (() -> Unit)? = null
 
+    /** «Пока обновление шло по сети, кто-то успел записать» — зовётся после снимка дерева. */
+    var onTree: (() -> Unit)? = null
+
+    /** Блобы в git не исчезают, когда файл переписан: старый sha читается и после коммита. */
+    private val blobs = mutableMapOf<String, String>()
+
     fun put(path: String, text: String) {
         files[path] = text
+        blobs[sha(text)] = text
         commitSha = "commit-${files.hashCode()}"
     }
 
@@ -59,13 +66,17 @@ class FakeGithubApi(
         if (commitSha != this.commitSha) {
             throw GithubHttpException(HTTP_NOT_FOUND, "нет коммита $commitSha")
         }
-        return files.mapValues { sha(it.value) }
+        // Дерево снимается ДО хука: у настоящего запроса ответ тоже собран на момент коммита, а
+        // не на момент, когда его дочитал клиент.
+        val tree = files.mapValues { sha(it.value) }
+        onTree?.invoke()
+        return tree
     }
 
     override fun readBlob(sha: String): String {
         fail?.let { throw it }
         readBlobCalls++
-        return files.values.firstOrNull { sha(it) == sha } ?: throw IOException("нет блоба $sha")
+        return blobs[sha] ?: throw IOException("нет блоба $sha")
     }
 
     override fun readFile(path: String): RepoCache.Entry {

@@ -37,9 +37,14 @@ class RepoWriteWorker(context: Context, params: WorkerParameters) :
                 Log.w(Probe.LOG_TAG, "PROBE:WRITE_SKIP no_token")
                 return@withContext Result.failure()
             }
+            // Тот же экземпляр, что держит экран: воркер живёт в том же процессе (в манифесте
+            // нет `android:process`), а два фасада над одним файлом кэша перетирали друг друга —
+            // правка владельца исчезала (блокер Б1).
             val store =
-                RepoStore(
-                    cache = RepoCache(RepoStore.cacheDir(applicationContext.filesDir), repo, token),
+                RepoStore.shared(
+                    cacheDir = RepoStore.cacheDir(applicationContext.filesDir),
+                    repo = repo,
+                    token = token,
                     api = GithubClient(repo, token),
                 )
             var sent = 0

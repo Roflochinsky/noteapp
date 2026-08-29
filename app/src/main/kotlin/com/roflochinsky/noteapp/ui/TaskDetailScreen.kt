@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -277,17 +278,15 @@ private fun StatusSegment(status: String, onStatus: (String) -> Unit) {
     ) {
         items.forEachIndexed { i, (value, label) ->
             if (i > 0) {
-                Box(Modifier.width(1.dp).height(TOUCH.dp).background(DocPalette.Line))
+                Box(Modifier.width(1.dp).height(SEG.dp).background(DocPalette.Line))
             }
             val on = value == status
             Box(
                 modifier =
                     Modifier.weight(1f)
-                        // Роль «переключатель»: TalkBack читает «в работе, выбрано», а не просто
-                        // подпись — иначе состояние `in_progress` на слух неотличимо (вердикт UX).
-                        .selectable(selected = on, role = Role.RadioButton) { onStatus(value) }
+                        .semantics(mergeDescendants = true) {}
                         .background(if (on) DocPalette.BlueSoft else DocPalette.Paper)
-                        .height(TOUCH.dp),
+                        .height(SEG.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -297,6 +296,11 @@ private fun StatusSegment(status: String, onStatus: (String) -> Unit) {
                             color = if (on) DocPalette.Blue else DocPalette.Mut,
                             fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
                         ),
+                )
+                // Роль «переключатель»: TalkBack читает «в работе, выбрано», а не просто подпись —
+                // иначе состояние `in_progress` на слух неотличимо (вердикт UX).
+                TouchStripe(
+                    Modifier.selectable(selected = on, role = Role.RadioButton) { onStatus(value) }
                 )
             }
         }
@@ -326,7 +330,12 @@ private fun Fields(
         ) {
             onSheet(Sheet.DUE)
         }
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        // Высоту строки задаёт сама строка (как у соседних `FieldRow`, комп `.frow{padding:13px}`),
+        // а не тач-таргеты чипов внутри: из-за них «Теги» были 52dp против 48 у соседей.
+        Row(
+            modifier = Modifier.fillMaxWidth().heightIn(min = TOUCH.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             FieldLabel("Теги")
             FlowRow(
                 modifier = Modifier.weight(1f).padding(vertical = 2.dp),
@@ -337,7 +346,7 @@ private fun Fields(
                     RemovableTag(tag) { onEdit(Edit.SetField("tags", tagsValue(task.tags - tag))) }
                 }
                 Box(
-                    modifier = Modifier.height(TOUCH.dp).clickable { onSheet(Sheet.TAG) },
+                    modifier = Modifier.semantics(mergeDescendants = true) {},
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
@@ -345,6 +354,7 @@ private fun Fields(
                         style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.Blue),
                         modifier = Modifier.padding(horizontal = 8.dp),
                     )
+                    TouchStripe(Modifier.clickable { onSheet(Sheet.TAG) })
                 }
             }
         }
@@ -589,35 +599,37 @@ private fun ActionButton(
 }
 
 /**
- * Крестик у тега рисуется в самом чипе — отдельного режима правки нет. Чип по компу низкий
- * (`.tagchip`, 4/10px), поэтому тач-таргет прозрачный и накрывает чип целиком по высоте — тот же
- * приём, что у чекбокса списка. Сносит тег только сторона крестика: случайный тап по тексту тег не
- * убивает, а подтверждения у такой мелочи быть не должно.
+ * Крестик у тега рисуется в самом чипе — отдельного режима правки нет. Сносит тег ТОЛЬКО крестик:
+ * полоса-таргет висит на нём, а не на чипе, и тап по тексту тег не убивает (подтверждения у такой
+ * мелочи быть не должно). Прежний `Box(size = TOUCH)` по `CenterEnd` обещал то же самое, а на
+ * коротком теге (`#a` ≈ 38dp) накрывал чип целиком — и тянул высоту строки к 48dp.
+ *
+ * ponytail: по горизонтали таргет уже 48dp — это ширина крестика. Расширять некуда: полоса залезла
+ * бы на соседний тег (зазор по компу 6dp) и сносила бы не тот. Промах по вертикали прощён — там
+ * пусто; промах по горизонтали безопасен: он просто ничего не делает.
  */
 @Composable
 private fun RemovableTag(tag: String, onRemove: () -> Unit) {
-    Box(contentAlignment = Alignment.Center) {
-        Row(
-            modifier =
-                Modifier.background(DocPalette.Paper2, RoundedCornerShape(8.dp))
-                    .padding(start = 10.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("#$tag", style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.Ink))
-            // Подпись для TalkBack висит на тач-таргете ниже — крестик её не дублирует.
+    Row(
+        modifier =
+            Modifier.background(DocPalette.Paper2, RoundedCornerShape(8.dp))
+                .padding(start = 10.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("#$tag", style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.Ink))
+        Box(contentAlignment = Alignment.Center) {
             Icon(
                 Icons.Filled.Close,
                 contentDescription = null,
                 tint = DocPalette.Mut,
                 modifier = Modifier.size(12.dp).padding(start = 2.dp),
             )
+            TouchStripe(
+                Modifier.clickable(onClick = onRemove).semantics {
+                    contentDescription = "убрать тег #$tag"
+                }
+            )
         }
-        Box(
-            Modifier.align(Alignment.CenterEnd)
-                .size(TOUCH.dp)
-                .clickable(onClick = onRemove)
-                .semantics { contentDescription = "убрать тег #$tag" }
-        )
     }
 }
 
@@ -629,5 +641,8 @@ internal fun tagsValue(tags: List<String>): String? =
         .distinct()
         .takeIf { it.isNotEmpty() }
         ?.let { "[${it.joinToString(", ")}]" }
+
+/** Высота сегмента статуса по компу: `.seg button{padding:10px 4px}` ≈ 38px. */
+private const val SEG = 38
 
 private const val TITLE_LINES = 3

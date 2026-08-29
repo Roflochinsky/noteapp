@@ -30,7 +30,6 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import com.roflochinsky.noteapp.pipeline.GithubClient
 import com.roflochinsky.noteapp.pipeline.NotesStore
-import com.roflochinsky.noteapp.pipeline.RepoCache
 import com.roflochinsky.noteapp.pipeline.RepoStore
 import com.roflochinsky.noteapp.pipeline.RepoWriteWorker
 import com.roflochinsky.noteapp.pipeline.Settings
@@ -83,7 +82,6 @@ class MainActivity : ComponentActivity() {
     private var input by mutableStateOf("")
     private var permTick by mutableIntStateOf(0)
     private var repoStore: RepoStore? = null
-    private var repoKey: String? = null
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -328,8 +326,9 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Один фасад на сессию: он держит снимок кэша, а пересоздание на каждое обновление этот снимок
-     * выбрасывало. Ключ — репо и токен: подключили GitHub в настройках — фасад пересоберётся сам.
+     * Один фасад на процесс — общий с воркером записи ([RepoStore.shared]): он держит снимок кэша,
+     * а второй экземпляр над тем же кэшем перетирал чужую запись (блокер Б1). Ключ — репо и токен:
+     * подключили GitHub в настройках — фасад пересоберётся сам.
      *
      * Долг Н-8 ревью Н1: `Settings` — это SharedPreferences, то есть диск; читаются они внутри
      * `withContext(Dispatchers.IO)`, главный поток только рисует.
@@ -339,13 +338,12 @@ class MainActivity : ComponentActivity() {
             withContext(Dispatchers.IO) {
                 val repo = Settings.githubRepo(this@MainActivity)
                 val token = Settings.githubToken(this@MainActivity)
-                val key = "$repo:${token?.hashCode() ?: 0}"
-                repoStore?.takeIf { repoKey == key }
-                    ?: RepoStore(
-                            cache = RepoCache(RepoStore.cacheDir(filesDir), repo, token),
-                            api = token?.let { GithubClient(repo, it) },
-                        )
-                        .also { repoKey = key }
+                RepoStore.shared(
+                    cacheDir = RepoStore.cacheDir(filesDir),
+                    repo = repo,
+                    token = token,
+                    api = token?.let { GithubClient(repo, it) },
+                )
             }
         if (fresh !== repoStore) {
             repoStore = fresh

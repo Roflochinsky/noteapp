@@ -46,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -342,6 +343,8 @@ fun NewTaskSheet(
                 FlowRow(
                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    // Комп: `.chips{gap:8px; flex-wrap:wrap}` — 8px и между рядами тоже.
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Chip(draft.project ?: "Без проекта", draft.project != null, true) {
                         picking = Picking.PROJECT
@@ -384,16 +387,19 @@ fun NewTaskSheet(
 }
 
 /**
- * Чип по компу: рамка, активный — синий на подложке; шеврон у тех, что открывают выбор. Сам чип
- * низкий (комп), поэтому кликается прозрачная полоса в 48dp вокруг него — приём чекбокса списка.
+ * Чип по компу: рамка, активный — синий на подложке; шеврон у тех, что открывают выбор. Высоту ряда
+ * задаёт сам чип (`.chip{padding:7px 12px}` ≈ 31dp), а кликается полоса в 48dp поверх него: ряд
+ * шторки создания состоит из одних чипов, и `Box(height = TOUCH)` вокруг чипа растил весь ряд до
+ * 48dp, а при переносе — вдвое (находка повторного ревью).
  */
 @Composable
 private fun Chip(label: String, on: Boolean, chevron: Boolean = false, onClick: () -> Unit) {
     Box(
-        modifier = Modifier.height(TOUCH.dp).clickable(onClick = onClick),
+        modifier = Modifier.semantics(mergeDescendants = true) {},
         contentAlignment = Alignment.Center,
     ) {
         ChipFace(label, on, chevron)
+        TouchStripe(Modifier.clickable(onClick = onClick))
     }
 }
 

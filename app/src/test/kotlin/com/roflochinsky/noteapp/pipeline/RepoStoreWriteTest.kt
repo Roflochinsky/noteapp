@@ -5,7 +5,9 @@ import java.time.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -193,7 +195,8 @@ class RepoStoreWriteTest {
         val screen = store(dir, api).also { it.refresh() }
         screen.setStatus(path, TaskFile.STATUS_DONE)
         assertTrue("галочка должна встать сразу", task(screen).isDone)
-        // Отправляет воркер — у него свой RepoStore над тем же кэшем (MainActivity держит свой).
+        // Второй экземпляр над тем же кэшем: в бою его больше нет (`RepoStore.shared`), но метка
+        // `RepoCache.stamp()` — то, на чём держится «экран видит чужой коммит», и её сторожим.
         val worker = store(dir, api)
         assertEquals(RepoStore.Push.MORE, worker.push())
         assertEquals(RepoStore.Push.EMPTY, worker.push())
@@ -244,7 +247,12 @@ class RepoStoreWriteTest {
         api.fail = GithubHttpException(UNPROCESSABLE, "Unprocessable Entity")
         assertEquals(RepoStore.Push.FAILED, store.push())
         api.fail = null
-        assertEquals("сломанная операция должна уйти из журнала", 1, store.view().pending.size)
+        val after = store.view()
+        assertEquals("сломанная операция должна уйти из журнала", 1, after.pending.size)
+        assertTrue(
+            "владелец должен узнать о снятой правке: ${after.notice}",
+            after.notice.orEmpty().contains("не принял"),
+        )
         assertEquals(RepoStore.Push.MORE, store.push())
         assertEquals(RepoStore.Push.EMPTY, store.push())
         assertTrue(api.text(path)!!, api.text(path)!!.contains("due: 2026-08-30"))
@@ -302,7 +310,104 @@ class RepoStoreWriteTest {
         assertTrue("тело файла пересобрано", text.contains("Описание из заметки."))
     }
 
+    /**
+     * Б1: обновление и отправка — два сетевых пути одного процесса, и они идут параллельно
+     * (`MainActivity.store()` при непустой очереди заводит воркер, `refreshRepo()` сразу следом
+     * зовёт `refresh()`). Правка, которую владелец уже видит, не должна исчезнуть — чей бы `save()`
+     * ни лёг вторым.
+     */
+    @Test
+    fun `обновление параллельно с отправкой не теряет правку владельца`() {
+        val api = api()
+        val store = ready(api)
+        store.setStatus(path, TaskFile.STATUS_DONE)
+        val drain = Thread {
+            var push = store.push()
+            while (push == RepoStore.Push.MORE) push = store.push()
+        }
+        // Отправка стартует ровно в окне между «дерево прочитано» и «снимок записан» — том
+        // самом, в котором обновление затирало коммит отправки старым деревом.
+        api.onTree = {
+            drain.start()
+            drain.join(HANDOFF_MS)
+        }
+        assertEquals(SyncStatus.OK, store.refresh())
+        drain.join()
+        assertTrue("коммит должен уйти в репо", api.text(path)!!.contains("status: done"))
+        assertFalse("очередь пуста — янтарь гаснет", path in store.view().pending)
+        assertTrue("ГАЛОЧКА ОТСКОЧИЛА: обновление затёрло коммит отправки", task(store).isDone)
+    }
+
+    /**
+     * Чужой текст приезжает из коммита, которого мы не знаем (`readFile` его не называет), — кэш не
+     * должен утверждать, что синхронизирован на прежнем: этого текста тот коммит не содержит.
+     */
+    @Test
+    fun `после 409 кэш не числит себя на коммите, которого не видел`() {
+        val dir = tmp.newFolder()
+        val api = api()
+        val store = store(dir, api).also { it.refresh() }
+        assertTrue(
+            "после обновления коммит известен",
+            RepoCache(dir, repo, "token").load().commitSha.isNotEmpty(),
+        )
+        store.edit(path, Edit.SetField("priority", "P3"))
+        api.onWrite = {
+            api.put(path, Edit.apply(fix, Edit.SetField("due", "2026-08-30")))
+            api.onWrite = null
+        }
+        assertEquals(RepoStore.Push.MORE, store.push()) // 409 → взяли чужой текст
+        assertEquals(
+            "кэш назвал коммит, которого чужой текст не содержит",
+            "",
+            RepoCache(dir, repo, "token").load().commitSha,
+        )
+    }
+
+    /** Один фасад на процесс: второй экземпляр над тем же кэшем — это и есть гонка Б1. */
+    @Test
+    fun `фасад на процесс один, воркер берёт тот же экземпляр`() {
+        val dir = tmp.newFolder()
+        val api = api()
+        val screen = RepoStore.shared(dir, repo, "token", api)
+        assertSame(
+            "воркер обязан взять экземпляр экрана",
+            screen,
+            RepoStore.shared(dir, repo, "token", api),
+        )
+        assertNotSame(
+            "сменился токен — кэш чужой",
+            screen,
+            RepoStore.shared(dir, repo, "other", api),
+        )
+    }
+
+    /** Д2: снятую операцию мало выбросить — владелец должен о ней узнать. */
+    @Test
+    fun `несколько сбоев за один прогон — владелец видит все, а не последний`() {
+        val api = api()
+        val second = "tasks/2026-08-25-vtoraya.md"
+        api.put(second, fix)
+        val store = ready(api)
+        store.edit(path, Edit.SetField("priority", "P3"))
+        store.edit(second, Edit.SetField("priority", "P3"))
+        api.remove(path)
+        api.remove(second)
+        assertEquals(RepoStore.Push.MORE, store.push())
+        assertEquals(RepoStore.Push.MORE, store.push())
+        val notice = store.view().notice.orEmpty()
+        assertTrue(notice, notice.contains(path))
+        assertTrue("сообщение о первом сбое затёрто вторым", notice.contains(second))
+    }
+
     private companion object {
         const val UNPROCESSABLE = 422
+
+        /**
+         * Сколько обновление даёт отправке на то, чтобы влезть в окно. Починенный код держит
+         * отправку на замке всё это время — секунда простоя в тесте; сломанный успевает записать за
+         * микросекунды (порт — фейк в памяти).
+         */
+        const val HANDOFF_MS = 1000L
     }
 }

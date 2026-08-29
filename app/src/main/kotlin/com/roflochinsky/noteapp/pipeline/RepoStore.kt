@@ -123,6 +123,19 @@ class RepoStore(
         return text
     }
 
+    /**
+     * Обновление и отправка — единственные два места, которые кэш переписывают, и в одном процессе
+     * они идут параллельно: экран зовёт [refresh] из pull-to-refresh, воркер записи — [push]. Оба
+     * сетевые, оба «прочитать снимок → записать снимок», и без замка выигрывает тот, чей `save()`
+     * лёг вторым: обновление кладёт дерево, прочитанное ДО коммита воркера, галочка отскакивает в
+     * «Открыта» (блокер Б1).
+     *
+     * ponytail: обычный монитор, а не файловая блокировка и не `Mutex`. Писатель один — воркер
+     * живёт в том же процессе, что и экран (`android:process` в манифесте нет), а сами методы
+     * блокирующие. Потолок: pull-to-refresh ждёт один сетевой запрос отправки; паузу в секунду
+     * между мутациями воркер держит между вызовами [push], то есть вне замка.
+     */
+    @Synchronized
     fun refresh(): SyncStatus {
         val api = api ?: return SyncStatus.NO_TOKEN
         return try {
@@ -151,6 +164,7 @@ class RepoStore(
     }
 
     /** Одна операция за вызов: паузу в секунду между мутациями держит воркер (research §4). */
+    @Synchronized
     fun push(): Push {
         val op = queue.pending().firstOrNull() ?: return Push.EMPTY
         val api = api ?: return Push.RETRY
@@ -207,7 +221,10 @@ class RepoStore(
                 mine = TaskFile.parse(op.path, Edit.apply(base.text, op.edit)),
                 theirs = TaskFile.parse(op.path, theirs.text),
             )
-        accept(op.path, theirs, snapshot.commitSha)
+        // Чужой текст приехал из коммита, которого мы не знаем: `readFile` его не называет.
+        // Оставить прежний sha — соврать («коммит, на котором мы синхронизированы», KDoc
+        // RepoCache): этого текста тот коммит не содержит. Пустой sha и значит «не знаем».
+        accept(op.path, theirs, commitSha = "")
         return when (outcome) {
             is ConflictRule.Divergence -> diverged(op, outcome.fields)
             // Правки не пересеклись: переигрываем ту же Edit поверх свежего текста.
@@ -262,9 +279,15 @@ class RepoStore(
         return drop(op)
     }
 
+    /**
+     * Сообщение владельцу дописывается, а не перезаписывается: за один прогон воркер снимает
+     * несколько операций (чужое удаление, наш баг), и владелец должен увидеть все, а не только
+     * последнюю. Плашка читает файл целиком и стирает его (см. [takeDivergence]).
+     */
     private fun say(text: String) {
         cache.dir.mkdirs()
-        File(cache.dir, DIVERGENCE).writeText(text)
+        val file = File(cache.dir, DIVERGENCE)
+        file.appendText(if (file.length() == 0L) text else "\n$text")
     }
 
     private fun drop(op: WriteQueue.Op): Push {
@@ -335,5 +358,28 @@ class RepoStore(
 
         /** Кэш репо на телефоне — `files/repo/`. */
         fun cacheDir(filesDir: File): File = File(filesDir, "repo")
+
+        private var shared: RepoStore? = null
+        private var sharedKey = ""
+
+        /**
+         * Один фасад на процесс — и экрану, и воркеру записи. Воркер WorkManager живёт в том же
+         * процессе, что и экран (`android:process` в манифесте нет), поэтому второй экземпляр над
+         * тем же файлом кэша — не требование архитектуры, а гонка на ровном месте: два «прочитать
+         * снимок → записать снимок» перетирали друг друга, и правка владельца исчезала (блокер Б1).
+         *
+         * Ключ — каталог кэша, репо и токен: сменились в настройках — фасад пересобирается, и
+         * данные, прочитанные отозванным токеном, на экране не остаются (решение LLD-23).
+         */
+        @Synchronized
+        fun shared(cacheDir: File, repo: String, token: String?, api: GithubApi?): RepoStore {
+            val key = "${cacheDir.path}|$repo|${token.orEmpty().hashCode()}"
+            val kept = shared
+            if (kept != null && sharedKey == key) return kept
+            return RepoStore(RepoCache(cacheDir, repo, token), api).also {
+                shared = it
+                sharedKey = key
+            }
+        }
     }
 }
