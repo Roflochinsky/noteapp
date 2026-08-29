@@ -7,6 +7,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.TextLayoutResult
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -59,6 +60,16 @@ class TaskSheetsTest {
         val title = fontSizeSp(compose.onNodeWithText("Проект"))
         val option = fontSizeSp(compose.onNodeWithText("tgsum"))
         assertTrue("заголовок $title sp, строка выбора $option sp", title > option)
+    }
+
+    /**
+     * Ловит `bd nikitatrubaev-0rk.27`: до среза заголовок брал `headlineSmall` 24sp — это Display
+     * компа (переключатель «Заметки | Задачи»). Комп v2 `.sheet .title` — 1.15rem = 18.4px, роль
+     * DESIGN.md — Headline ступенью ниже, в теме это 19sp (`OverlayHeadline`).
+     */
+    @Test
+    fun `заголовок шторки набран Headline ступенью ниже, а не Display`() {
+        assertEquals(19f, fontSizeSp(compose.onNodeWithText("Проект")), 0.01f)
     }
 
     private fun fontSizeSp(node: SemanticsNodeInteraction): Float {

@@ -220,7 +220,7 @@ private fun Header(
         } else {
             Text(
                 task.title,
-                style = MaterialTheme.typography.headlineSmall,
+                style = MaterialTheme.typography.titleLarge,
                 maxLines = TITLE_LINES,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 2.dp),
@@ -246,7 +246,7 @@ private fun TitleField(title: String, onTitle: (String) -> Unit, onClose: () -> 
     TextField(
         value = draft,
         onValueChange = { draft = it },
-        textStyle = MaterialTheme.typography.headlineSmall,
+        textStyle = MaterialTheme.typography.titleLarge,
         singleLine = true,
         colors =
             TextFieldDefaults.colors(

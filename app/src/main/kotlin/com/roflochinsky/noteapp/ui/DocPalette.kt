@@ -74,11 +74,22 @@ private val scheme =
 // Roboto — системный шрифт Android (пин владельца); mono — для цифр.
 private val docType =
     Typography(
+        // Display (DESIGN.md): переключатель «Заметки | Задачи» и заголовок онбординга.
+        // Комп v2 `.switch b` — 1.45rem = 23.2px ≈ 24sp, трекинг −0.02em ≈ −0.4sp.
         headlineSmall =
             TextStyle(
                 fontWeight = FontWeight.Bold,
                 fontSize = 24.sp,
                 letterSpacing = (-0.4).sp,
+                color = DocPalette.Ink,
+            ),
+        // Headline (DESIGN.md): заголовок деталки задачи.
+        // Комп v2 `.dt-head h4` — 1.3rem = 20.8px ≈ 21sp, трекинг −0.015em ≈ −0.3sp.
+        titleLarge =
+            TextStyle(
+                fontWeight = FontWeight.Bold,
+                fontSize = 21.sp,
+                letterSpacing = (-0.3).sp,
                 color = DocPalette.Ink,
             ),
         titleMedium =
@@ -97,6 +108,17 @@ private val docType =
                 color = DocPalette.Mut,
             ),
     )
+
+/**
+ * Headline «тот же голос ступенью ниже» (DESIGN.md) — заголовок диалога и шторки.
+ *
+ * Комп v2 даёт им `.dlg h4` 1.2rem = 19.2px и `.sheet .title` 1.15rem = 18.4px: разница 0.8px, то
+ * есть меньше одного sp, и DESIGN.md держит оба одной ступенью — поэтому кегль один, 19sp (он ближе
+ * к обоим, чем 18sp). Своего слота между `titleLarge` (21sp) и `titleMedium` (17sp) в Material3
+ * нет, поэтому ступень живёт именованным стилем рядом с темой, а не враньём в чужом слоте. Трекинг
+ * наследуется от Headline: −0.3sp при 19sp — это ровно −0.015em компа.
+ */
+internal val OverlayHeadline = docType.titleLarge.copy(fontSize = 19.sp)
 
 @Composable
 fun DocTheme(content: @Composable () -> Unit) {

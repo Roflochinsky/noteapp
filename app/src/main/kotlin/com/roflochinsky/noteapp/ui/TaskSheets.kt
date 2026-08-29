@@ -81,15 +81,12 @@ private fun Sheet(onDismiss: () -> Unit, content: @Composable () -> Unit) {
  * набраны им одинаково, поэтому заголовок один на все шторки.
  *
  * До среза `bd nikitatrubaev-0rk.26` здесь стоял `labelSmall` ПРОПИСНЫМИ 11sp — рубрика вместо
- * заголовка, прямо против «правила рубрики» DESIGN.md.
+ * заголовка, прямо против «правила рубрики» DESIGN.md; до `0rk.27` — `headlineSmall` 24sp, то есть
+ * Display компа, на 5sp крупнее заказанного.
  */
 @Composable
 private fun SheetTitle(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.headlineSmall,
-        modifier = Modifier.padding(bottom = 8.dp),
-    )
+    Text(text, style = OverlayHeadline, modifier = Modifier.padding(bottom = 8.dp))
 }
 
 /** Строки выбора: радио, подпись, счётчик справа (нулевые значения остаются со счётчиком 0). */
@@ -263,7 +260,7 @@ fun DeleteTaskDialog(title: String, path: String, onDismiss: () -> Unit, onDelet
         onDismissRequest = onDismiss,
         containerColor = DocPalette.Paper,
         shape = RoundedCornerShape(24.dp),
-        title = { Text("Удалить задачу?", style = MaterialTheme.typography.headlineSmall) },
+        title = { Text("Удалить задачу?", style = OverlayHeadline) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(title, style = MaterialTheme.typography.bodyMedium)

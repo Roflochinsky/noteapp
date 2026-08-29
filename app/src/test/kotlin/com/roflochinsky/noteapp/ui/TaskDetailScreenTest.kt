@@ -2,8 +2,10 @@ package com.roflochinsky.noteapp.ui
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
@@ -14,7 +16,9 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import com.roflochinsky.noteapp.pipeline.Edit
 import com.roflochinsky.noteapp.pipeline.TaskFile
@@ -64,6 +68,25 @@ class TaskDetailScreenTest {
                 )
             }
         }
+    }
+
+    /**
+     * Ловит `bd nikitatrubaev-0rk.27`: оба заголовка сидели на `headlineSmall` 24sp — это Display
+     * компа, кегль завышен на 3–5sp. Комп v2: деталка `.dt-head h4` 1.3rem = 20.8px ≈ 21sp, диалог
+     * `.dlg h4` 1.2rem = 19.2px ≈ 19sp (роль Headline и она же ступенью ниже).
+     */
+    @Test
+    fun `заголовки деталки и диалога набраны Headline, а не Display`() {
+        detail(task())
+        assertEquals(21f, fontSizeSp(compose.onNodeWithText("Купить хлеб")), 0.01f)
+        compose.onNodeWithText("Удалить").performClick()
+        assertEquals(19f, fontSizeSp(compose.onNodeWithText("Удалить задачу?")), 0.01f)
+    }
+
+    private fun fontSizeSp(node: SemanticsNodeInteraction): Float {
+        val layouts = mutableListOf<TextLayoutResult>()
+        node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        return layouts.first().layoutInput.style.fontSize.value
     }
 
     /**
