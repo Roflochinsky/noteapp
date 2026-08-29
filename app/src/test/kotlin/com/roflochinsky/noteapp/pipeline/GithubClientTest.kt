@@ -61,6 +61,29 @@ class GithubClientTest {
         assertTrue(tree.toString(), tree.keys.all { it.endsWith(".md") })
     }
 
+    /**
+     * Долг Н-7 ревью Н1: поиск обработанной заметки читает дерево по SHA коммита, а не по имени
+     * ветки. Видно по второму запросу — в нём стоит `$commit`, а не `main`. Правило «мимо `inbox/`»
+     * живёт на фейке порта — [GithubApiTest].
+     */
+    @Test
+    fun `поиск обработанной заметки идёт по sha коммита и обходит inbox`() {
+        val client = client { url ->
+            if ("git/ref" in url) fixture("ref") else fixture("trees-recursive")
+        }
+        assertEquals(
+            "встречи/2026-08-24-1807-reliz-tgsum.md",
+            client.findDonePath("2026-08-24-1807"),
+        )
+        assertEquals(
+            listOf(
+                "https://api.github.com/repos/$repo/git/ref/heads/main",
+                "https://api.github.com/repos/$repo/git/trees/$commit?recursive=1",
+            ),
+            asked,
+        )
+    }
+
     /** Решение LLD-14: в репо есть кириллические папки, путь кодируется по одному месту на всё. */
     @Test
     fun `кириллица в пути уходит процентами UTF-8`() {

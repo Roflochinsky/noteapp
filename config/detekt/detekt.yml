@@ -4,6 +4,22 @@ naming:
   FunctionNaming:
     ignoreAnnotated: ['Composable']
 complexity:
+  # Файлы разметки экранов выведены из-под правила поимённо (решение владельца 2026-08-29,
+  # фактура — журнал docs/plans/2026-08-26-tasks-v2.md): композабл-файл длинный по природе,
+  # это разметка, а не поверхность класса. Общего послабления нет: `ignoreAnnotated` здесь
+  # ключ-пустышка (правило вешает находку на файл или класс, а они не аннотированы), а
+  # `ignorePrivate` глушил ровно те классы, где ревью нашло блокеры.
+  TooManyFunctions:
+    # ВНИМАНИЕ: `excludes` ЗАМЕНЯЕТ дефолтный список detekt, а в нём стояли тестовые каталоги.
+    # Без первых трёх строк правило начинает считать функции в тестах, и по классам расползаются
+    # `@Suppress`, лечащие отключённый дефолт, а не настоящий сигнал (находка Д9).
+    excludes:
+      - '**/test/**'
+      - '**/androidTest/**'
+      - '**/commonTest/**'
+      - '**/ui/TaskSheets.kt'
+      - '**/ui/TaskDetailScreen.kt'
+      - '**/ui/TasksScreen.kt'
   LongMethod:
     ignoreAnnotated: ['Composable']
   CyclomaticComplexMethod:

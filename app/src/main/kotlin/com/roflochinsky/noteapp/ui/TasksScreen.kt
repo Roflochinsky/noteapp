@@ -11,15 +11,19 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -37,8 +41,11 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -46,6 +53,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,12 +63,14 @@ import androidx.compose.ui.unit.dp
 import com.roflochinsky.noteapp.pipeline.SyncStatus
 import com.roflochinsky.noteapp.pipeline.TaskFile
 import java.time.LocalDate
+import kotlinx.coroutines.delay
 
 /**
  * Экран задач по борду 1 компа: рубрики приоритета, строка-документ с чекбоксом, свёрнутое
  * «Сделано», кнопка внизу. Карточек, бейджей и канбана в этом мире нет (DESIGN.md).
  *
- * В срезе Н1 экран только читает: чекбокс и «Новая задача» оживают срезом Н2.
+ * Чекбокс бинарен: `done ↔ open`, «в работе» ставится только сегментом в деталке. После тапа —
+ * снекбар «Сделано · Отменить» на 5 секунд; отправка стартует, когда он закроется.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,38 +80,152 @@ fun TasksScreen(
     sync: SyncStatus,
     refreshing: Boolean,
     isRecording: Boolean,
+    notice: String?,
+    pending: (String) -> Boolean,
     onTab: (Tab) -> Unit,
     onRefresh: () -> Unit,
     onRecord: () -> Unit,
     onSettings: () -> Unit,
+    onTask: (String) -> Unit,
+    onNewTask: () -> Unit,
+    onToggle: (TaskFile.Task) -> String,
+    onCancel: (String) -> Unit,
+    onFlush: () -> Unit,
+    onNotice: () -> Unit,
 ) {
     val pull = rememberPullToRefreshState()
-    Column(Modifier.fillMaxSize()) {
-        SectionTabs(Tab.TASKS, TaskFilter.openCount(tasks), onTab, onSettings)
-        SyncLine(sync, onSettings)
-        PullToRefreshBox(
-            isRefreshing = refreshing,
-            onRefresh = onRefresh,
-            modifier = Modifier.weight(1f),
-            state = pull,
-            indicator = {
-                PullToRefreshDefaults.Indicator(
-                    state = pull,
-                    isRefreshing = refreshing,
-                    modifier = Modifier.align(Alignment.TopCenter),
-                    containerColor = DocPalette.Paper,
-                    color = DocPalette.Blue,
-                )
-            },
-        ) {
-            TaskList(tasks, today)
+    var undo by remember { mutableStateOf<String?>(null) }
+    // Владелец ушёл с экрана, не дождавшись конца окна отмены, — отправку планируем здесь
+    // (находка Д3). Эффект висит на экране, а не на id операции: `DisposableEffect(id)` при смене
+    // id диспозился и тянул ВСЮ очередь, включая ту операцию, для которой снекбар ещё предлагал
+    // «Отменить», а `queue.cancel` к тому моменту уже бессилен (находка повторного ревью).
+    //
+    // ponytail: поворот экрана composition тоже уничтожает, и правка уезжает сразу — окно отмены
+    // пересоздания активити не переживает. Так же ведёт себя и холодный старт: `store()` при
+    // непустой очереди заводит воркер сам. Правка при этом не теряется — она именно уходит.
+    DisposableEffect(Unit) { onDispose { onFlush() } }
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
+            SectionTabs(Tab.TASKS, TaskFilter.openCount(tasks), onTab, onSettings)
+            SyncLine(sync, onSettings)
+            notice?.let { DivergenceLine(it, onNotice) }
+            PullToRefreshBox(
+                isRefreshing = refreshing,
+                onRefresh = onRefresh,
+                modifier = Modifier.weight(1f),
+                state = pull,
+                indicator = {
+                    PullToRefreshDefaults.Indicator(
+                        state = pull,
+                        isRefreshing = refreshing,
+                        modifier = Modifier.align(Alignment.TopCenter),
+                        containerColor = DocPalette.Paper,
+                        color = DocPalette.Blue,
+                    )
+                },
+            ) {
+                TaskList(tasks, today, pending, onTask) { task ->
+                    val id = onToggle(task)
+                    undo = if (task.isDone) null else id
+                    if (task.isDone) onFlush()
+                }
+            }
+            if (isRecording) {
+                RecordBar(isRecording = true, onRecord = onRecord)
+            } else {
+                NewTaskBar(onNewTask)
+            }
         }
-        if (isRecording) RecordBar(isRecording = true, onRecord = onRecord) else NewTaskBar()
+        undo?.let { id ->
+            // Окно отмены закрылось по таймеру — отправляем. Лишний прогон после «Отменить»
+            // безвреден: очередь пуста, воркер сразу отдаёт success.
+            LaunchedEffect(id) {
+                delay(UNDO_MS)
+                undo = null
+                onFlush()
+            }
+            Snack("Сделано", "Отменить", Modifier.align(Alignment.BottomCenter)) {
+                onCancel(id)
+                undo = null
+                onFlush()
+            }
+        }
+    }
+}
+
+/**
+ * Расхождение по 409 — непрерывающая плашка под шапкой, рядом со строкой синка: не модалка и не
+ * `Toast`, палитра — янтарь внимания (`err` в этом мире только на кнопке «Удалить»). Владелец
+ * дочитывает её сам или ждёт, пока она уйдёт; список под ней живой.
+ *
+ * Таймер живёт внутри плашки: пока владелец в деталке задачи, она не нарисована — значит и не
+ * истекает, и сообщение дождётся возвращения на список.
+ */
+@Composable
+internal fun DivergenceLine(text: String, onDone: () -> Unit) {
+    LaunchedEffect(text) {
+        delay(NOTICE_MS)
+        onDone()
+    }
+    Box(
+        modifier =
+            Modifier.fillMaxWidth()
+                .clickable(onClick = onDone)
+                .heightIn(min = TOUCH.dp)
+                .padding(horizontal = 22.dp, vertical = 8.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Text(text, style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.Amber))
+    }
+}
+
+/**
+ * Снекбар с действием — единственная модалка-не-модалка внизу; сообщения без действия — плашкой.
+ */
+@Composable
+private fun Snack(text: String, action: String, modifier: Modifier, onAction: () -> Unit) {
+    Row(
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .navigationBarsPadding()
+                .background(DocPalette.Nav, RoundedCornerShape(12.dp))
+                .heightIn(min = TOUCH.dp)
+                .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.OnNav),
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            action.uppercase(),
+            style =
+                MaterialTheme.typography.labelSmall.copy(
+                    color = DocPalette.OnNav,
+                    fontWeight = FontWeight.Bold,
+                ),
+            // Тач-таргет действия — вся высота снекбара (не меньше 48dp), а не кегль подписи.
+            modifier =
+                Modifier.clickable(onClick = onAction)
+                    .fillMaxHeight()
+                    .padding(start = 16.dp)
+                    .wrapContentHeight(),
+        )
     }
 }
 
 @Composable
-private fun TaskList(tasks: List<TaskFile.Task>, today: LocalDate) {
+private fun TaskList(
+    tasks: List<TaskFile.Task>,
+    today: LocalDate,
+    pending: (String) -> Boolean,
+    onTask: (String) -> Unit,
+    onToggle: (TaskFile.Task) -> Unit,
+) {
     val groups = TaskFilter.byPriority(tasks, today)
     val done = TaskFilter.done(tasks, today)
     var doneOpen by rememberSaveable { mutableStateOf(false) }
@@ -119,7 +245,7 @@ private fun TaskList(tasks: List<TaskFile.Task>, today: LocalDate) {
                 if (i > 0) {
                     HorizontalDivider(color = DocPalette.Line)
                 }
-                TaskRow(task, today)
+                TaskRow(task, today, pending(task.path), onTask, onToggle)
             }
         }
         if (done.isNotEmpty()) {
@@ -131,7 +257,7 @@ private fun TaskList(tasks: List<TaskFile.Task>, today: LocalDate) {
                     if (i > 0) {
                         HorizontalDivider(color = DocPalette.Line)
                     }
-                    TaskRow(task, today)
+                    TaskRow(task, today, pending(task.path), onTask, onToggle)
                 }
             }
         }
@@ -152,14 +278,24 @@ private fun PriorityRubric(priority: String) {
 }
 
 @Composable
-private fun TaskRow(task: TaskFile.Task, today: LocalDate) {
+private fun TaskRow(
+    task: TaskFile.Task,
+    today: LocalDate,
+    pending: Boolean,
+    onTask: (String) -> Unit,
+    onToggle: (TaskFile.Task) -> Unit,
+) {
     Row(
         // Отступ такой, чтобы видимый чекбокс встал на гуттер 22dp, а его тач-таргет остался 48dp.
         modifier = Modifier.fillMaxWidth().padding(start = 7.5.dp, end = 22.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        TaskCheckbox(task.isDone)
-        Column(Modifier.padding(top = 13.dp, bottom = 14.dp)) {
+        TaskCheckbox(task.isDone, task.title) { onToggle(task) }
+        Column(
+            Modifier.clickable { onTask(task.path) }
+                .fillMaxWidth()
+                .padding(top = 13.dp, bottom = 14.dp)
+        ) {
             Text(
                 task.title,
                 style =
@@ -175,15 +311,27 @@ private fun TaskRow(task: TaskFile.Task, today: LocalDate) {
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            TaskMeta(task, today)
+            TaskMeta(task, today, pending)
         }
     }
 }
 
-/** Визуально 19dp по компу, тач-таргет — 48dp (правило доступности). */
+/**
+ * Визуально 19dp по компу, тач-таргет — 48dp (правило доступности). `toggleable` с ролью — чтобы
+ * TalkBack читал «флажок, отмечено», а не безымянную кнопку (вердикт UX про семантику).
+ *
+ * Описание называет ЗАДАЧУ и только её: состояние к нему добавляет сама роль `Checkbox`. Прежнее
+ * «сделана: $title» стояло и на неотмеченном флажке — TalkBack читал его как утверждение, что
+ * задача сделана, то есть врал ровно там, где владелец видеть не может (находка Д11).
+ */
 @Composable
-private fun TaskCheckbox(done: Boolean) {
-    Box(Modifier.size(TOUCH.dp), contentAlignment = Alignment.Center) {
+private fun TaskCheckbox(done: Boolean, title: String, onToggle: () -> Unit) {
+    Box(
+        Modifier.size(TOUCH.dp)
+            .toggleable(value = done, role = Role.Checkbox, onValueChange = { onToggle() })
+            .semantics { contentDescription = title },
+        contentAlignment = Alignment.Center,
+    ) {
         Box(
             modifier =
                 Modifier.size(19.dp)
@@ -212,12 +360,17 @@ private fun TaskCheckbox(done: Boolean) {
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TaskMeta(task: TaskFile.Task, today: LocalDate) {
+private fun TaskMeta(task: TaskFile.Task, today: LocalDate, pending: Boolean) {
     val overdue = TaskFilter.isOverdue(task, today)
     val text = MaterialTheme.typography.bodySmall
     val mono = MaterialTheme.typography.labelMedium
     val parts =
         buildList<@Composable () -> Unit> {
+            // Состояние записи важнее полей: «в очереди» стоит первым и всегда янтарём (вердикт
+            // UX).
+            if (pending) {
+                add { Text("в очереди", style = text.copy(color = DocPalette.Amber)) }
+            }
             task.project?.let { project -> add { Text(project, style = text) } }
             if (overdue) {
                 add { OverdueLabel(task.due!!, today) }
@@ -320,23 +473,21 @@ private fun EmptyTasks() {
     }
 }
 
-/** Заглушка среза Н1: создание задачи приходит следующим срезом. */
 @Composable
-private fun NewTaskBar() {
+private fun NewTaskBar(onNewTask: () -> Unit) {
     Column(
         modifier =
             Modifier.fillMaxWidth().padding(22.dp, 12.dp, 22.dp, 8.dp).navigationBarsPadding(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Button(
-            onClick = {},
-            enabled = false,
+            onClick = onNewTask,
             modifier = Modifier.fillMaxWidth().height(54.dp),
             shape = RoundedCornerShape(14.dp),
             colors =
                 ButtonDefaults.buttonColors(
-                    disabledContainerColor = DocPalette.Paper2,
-                    disabledContentColor = DocPalette.Mut,
+                    containerColor = DocPalette.Nav,
+                    contentColor = DocPalette.OnNav,
                 ),
         ) {
             Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -351,6 +502,7 @@ private fun NewTaskBar() {
     }
 }
 
-private const val TOUCH = 48
 private const val CLOCK = 13
 private const val VIEWBOX = 24f
+private const val UNDO_MS = 5000L
+private const val NOTICE_MS = 6000L

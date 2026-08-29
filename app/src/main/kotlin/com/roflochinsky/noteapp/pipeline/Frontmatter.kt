@@ -80,8 +80,12 @@ internal object Frontmatter {
      */
     fun render(fields: Map<String, String>): String =
         fields.entries.joinToString("\n", prefix = "$FENCE\n", postfix = "\n$FENCE\n") {
-            if (it.value.isEmpty()) "${it.key}:" else "${it.key}: ${quote(it.value)}"
+            field(it.key, it.value)
         }
+
+    /** Одна строка frontmatter — единственное место, где решается вопрос кавычек. */
+    fun field(key: String, value: String): String =
+        if (value.isEmpty()) "$key:" else "$key: ${quote(value)}"
 
     fun list(value: String?): List<String> =
         value
