@@ -35,7 +35,7 @@ class GithubBatchTest {
         checkNotNull(javaClass.getResource("/github/$name.json")) { "нет фикстуры $name" }
             .readText()
 
-    private fun client(refuseRef: Int = 0) =
+    private fun client(refuseRef: Int = 0, code: Int = 422) =
         GithubClient(
             repo,
             "ghp_v-test-ne-uhodit",
@@ -56,7 +56,7 @@ class GithubBatchTest {
                     else -> {
                         patches++
                         if (patches <= refuseRef) {
-                            throw GithubHttpException(422, "Update is not a fast forward")
+                            throw GithubHttpException(code, "Update is not a fast forward")
                         }
                         ""
                     }
@@ -110,6 +110,30 @@ class GithubBatchTest {
             }
         assertEquals(422, e.code)
         assertEquals(2, patches)
+    }
+
+    /**
+     * Research (`docs/research/github-sync-api.md`, «`force: false` — это защита от гонки»)
+     * перечисляет у `PATCH ref` коды 200, 409 и 422. Оба отказа означают одно: HEAD сдвинулся или
+     * ветка недоступна — пересобрать пачку на свежем HEAD, а не падать.
+     */
+    @Test
+    fun `отказ ветки кодом 409 — та же пересборка, что и на 422`() {
+        assertEquals(
+            newCommit,
+            client(refuseRef = 1, code = 409).commitBatch(changes, Migration.MESSAGE).commitSha,
+        )
+        assertEquals(2, patches)
+    }
+
+    @Test
+    fun `чужой код наружу без пересборки — это не гонка ветки`() {
+        val e =
+            assertThrows(GithubHttpException::class.java) {
+                client(refuseRef = 1, code = 404).commitBatch(changes, Migration.MESSAGE)
+            }
+        assertEquals(404, e.code)
+        assertEquals(1, patches)
     }
 
     @Test

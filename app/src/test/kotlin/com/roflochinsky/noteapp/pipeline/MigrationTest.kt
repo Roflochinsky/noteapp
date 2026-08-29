@@ -135,6 +135,46 @@ class MigrationTest {
     }
 
     /**
+     * Опасное направление — чекбокс ПОСЛЕ секции: если секция перестанет закрываться, миграция
+     * поедет по «Ключевому», следующим жирным блокам и транскрипту, переписывая чужой текст
+     * заметки. Закрывают секцию все три признака сразу, поэтому проверяются все три.
+     */
+    @Test
+    fun `секция Задачи закрылась — дальше снова чужой текст`() {
+        listOf("\n", "## Ключевое\n", "**Ключевое.**\n").forEach { closer ->
+            val body = "**Задачи.**\n- [ ] дело\n" + closer + "- [ ] это не задача\n"
+            val plan = Migration.plan(mapOf("идеи/2026-08-12-a.md" to note(body = body)))
+            assertEquals(closer, listOf("дело"), plan.made.map { it.title })
+        }
+    }
+
+    /**
+     * Критерий 17 спеки: ни одна заметка не теряет текст. Заголовок ровно `x` даёт ссылку `-
+     * [x](../tasks/2026-08-12-x.md)`, а она снова подходит под шаблон чекбокса: второй прогон
+     * прочёл бы её как сделанный чекбокс с заголовком «(../tasks/…md)», завёл мусорную задачу и
+     * затёр ссылку — заголовок «x» из заметки исчез бы.
+     */
+    @Test
+    fun `односимвольный заголовок не съедается вторым прогоном`() {
+        listOf(" ", "x").forEach { mark ->
+            listOf("x", "X", "(в скобках)").forEach { title ->
+                val path = "идеи/2026-08-12-a.md"
+                val files =
+                    mapOf(path to note(body = "**Задачи.**\n- [" + mark + "] " + title + "\n"))
+                val once = Migration.plan(files)
+                assertEquals(listOf(title), once.made.map { it.title })
+                val after = apply(files, once)
+                val twice = Migration.plan(after)
+                assertTrue("[" + mark + "] " + title + ": " + twice.made, twice.isEmpty)
+                assertTrue(
+                    after.getValue(path),
+                    after.getValue(path).contains("- [" + title + "](../tasks/"),
+                )
+            }
+        }
+    }
+
+    /**
      * Имя файла задачи детерминировано (требование среза): сухой прогон обещает ровно то, что
      * сделает настоящий. Порядок ключей карты приходит от GitHub и повторяться не обязан, поэтому
      * заметки обходятся отсортированными.
@@ -159,6 +199,36 @@ class MigrationTest {
         val plan = Migration.plan(mapOf("идеи/без-даты.md" to note))
         assertTrue(plan.isEmpty)
         assertEquals(listOf("идеи/без-даты.md"), plan.skipped)
+    }
+
+    /**
+     * Заметка с CRLF: переписанная строка должна остаться CRLF, иначе в файле заводятся смешанные
+     * переводы строк — текст цел, но следующий дифф владельца показывает «изменилось всё».
+     */
+    @Test
+    fun `у заметки с CRLF переводы строк не смешиваются`() {
+        val path = "идеи/2026-08-12-a.md"
+        val text = note(body = "**Задачи.**\n- [ ] дело\n").replace("\n", "\r\n")
+        val after = put(Migration.plan(mapOf(path to text)), path)
+        assertTrue(after, after.contains("- [дело](../tasks/2026-08-12-delo.md)\r\n"))
+        assertEquals(text.count { it == '\r' }, after.count { it == '\r' })
+    }
+
+    /**
+     * Вложенный чекбокс становится отдельной задачей верхнего уровня, а не подзадачей родителя:
+     * родство задач миграция не переносит (заведено отдельно — `nikitatrubaev-0rk.28`). Текст при
+     * этом цел — отступ строки сохраняется, вложенность видна в самой заметке.
+     */
+    @Test
+    fun `вложенная подзадача — отдельная задача, но отступ строки цел`() {
+        val path = "идеи/2026-08-12-a.md"
+        val body = "**Задачи.**\n- [ ] дело\n  - [ ] подпункт\n"
+        val plan = Migration.plan(mapOf(path to note(body = body)))
+        assertEquals(listOf("дело", "подпункт"), plan.made.map { it.title })
+        assertTrue(
+            put(plan, path),
+            put(plan, path).contains("\n  - [подпункт](../tasks/2026-08-12-podpunkt.md)"),
+        )
     }
 
     private fun put(plan: Migration.Plan, path: String): String =

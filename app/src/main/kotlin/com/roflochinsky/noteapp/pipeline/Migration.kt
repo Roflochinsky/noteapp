@@ -94,7 +94,10 @@ object Migration {
                     taken += task
                     changes += BatchPlan.Put(task, task(task, title, done, note, date))
                     made += Made(path, title, task, done)
-                    "${box.groupValues[INDENT]}- [$title](../${TaskFile.DIR}$name)"
+                    // Заметка могла прийти с CRLF: `\s*$` шаблона съедает `\r`, и без возврата
+                    // на место в файле завелись бы смешанные переводы строк.
+                    val eol = if (line.endsWith("\r")) "\r" else ""
+                    "${box.groupValues[INDENT]}- [$title](../${TaskFile.DIR}$name)$eol"
                 }
             }
         if (made.isEmpty()) return Plan(emptyList(), emptyList(), emptyList())
@@ -153,7 +156,14 @@ object Migration {
     private const val INDENT = 1
     private const val MARK = 2
     private const val TITLE = 3
-    private val CHECKBOX = Regex("""^(\s*)[-*]\s*\[([ xX])]\s*(.+?)\s*$""")
+    /**
+     * `(?!\()` — та самая правка, которой держится критерий 17 «ни одна заметка не теряет текст».
+     * Заголовок ровно `x` даёт ссылку `- [x](../tasks/2026-08-12-x.md)`, и без этого запрета она
+     * снова подходит под шаблон: второй прогон читает её как сделанный чекбокс с заголовком
+     * «(../tasks/…md)» и затирает ссылку. Скобка сразу после `]` — это markdown-ссылка, а не
+     * чекбокс; у настоящего чекбокса между ними всегда пробел.
+     */
+    private val CHECKBOX = Regex("""^(\s*)[-*]\s*\[([ xX])](?!\()\s*(.+?)\s*$""")
     private val HEADER = Regex("""^\s*(\*\*Задачи[.:]?\*\*|#+\s*Задачи)\s*$""")
     private val DATE = Regex("""\d{4}-\d{2}-\d{2}""")
 }

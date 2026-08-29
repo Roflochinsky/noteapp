@@ -67,9 +67,9 @@ class GithubClient(
      * Пять запросов на любую пачку: ref → базовое дерево → новое дерево → коммит → движение ветки.
      *
      * `force: false` отклоняет коммит, если ветка успела уйти вперёд (Action записал саммари) —
-     * тогда пачка пересобирается на новом HEAD **один** раз. Второй отказ уходит наружу
-     * исключением: бесконечно догонять чужие коммиты миграция не должна, а `force: true` в noteapp
-     * не бывает никогда.
+     * тогда пачка пересобирается на новом HEAD **один** раз ([REF_REFUSED]). Второй отказ уходит
+     * наружу исключением: бесконечно догонять чужие коммиты миграция не должна, а `force: true` в
+     * noteapp не бывает никогда.
      */
     override fun commitBatch(changes: List<BatchPlan.Change>, message: String): Written {
         if (changes.isEmpty()) return Written(null, "")
@@ -82,7 +82,7 @@ class GithubClient(
                 write("PATCH", "$API/$repo/git/refs/heads/main", BatchPlan.ref(commit).toString())
                 return Written(null, commit)
             } catch (e: GithubHttpException) {
-                if (e.code != HTTP_UNPROCESSABLE || attempt == ATTEMPTS - 1) throw e
+                if (e.code !in REF_REFUSED || attempt == ATTEMPTS - 1) throw e
             }
         }
         error("недостижимо: цикл возвращает или бросает")
@@ -108,7 +108,13 @@ class GithubClient(
         const val API = "https://api.github.com/repos"
         const val TIMEOUT_MS = 60_000
         const val ERR_PREVIEW = 300
-        const val HTTP_UNPROCESSABLE = 422
+
+        /**
+         * Отказ `PATCH ref` с `force: false`. Research перечисляет у него 200, 409 и 422; оба
+         * отказа для нас одно и то же — ветка не там, где мы её оставили, значит пересобрать пачку
+         * на свежем HEAD. Различать их незачем: лечение общее.
+         */
+        val REF_REFUSED = setOf(409, 422)
 
         /** Попытка плюс ровно одна пересборка на 422 — больше миграция не догоняет. */
         const val ATTEMPTS = 2

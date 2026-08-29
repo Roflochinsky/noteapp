@@ -92,7 +92,11 @@ class MigrationSmokeTest {
         }
     }
 
-    private fun report(plan: Migration.Plan): String = buildString {
+    /**
+     * Отчёт перечисляет не только изменяемое: «осмотрено N, не тронуто M» — единственное, чем
+     * владелец отличает «миграции нечего делать» от «прогон не дошёл до заметок».
+     */
+    private fun report(files: Map<String, String>, plan: Migration.Plan): String = buildString {
         appendLine("МИГРАЦИЯ · сухой прогон по $repo")
         plan.made
             .groupBy { it.note }
@@ -106,6 +110,12 @@ class MigrationSmokeTest {
                 }
             }
         plan.skipped.forEach { appendLine("  пропущена (нет даты): $it") }
+        val notes = files.keys.count(Migration::isNote)
+        val changed = plan.made.map { it.note }.distinct().size
+        appendLine(
+            "  осмотрено заметок $notes, изменяется $changed, пропущено ${plan.skipped.size}, " +
+                "не тронуто ${notes - changed - plan.skipped.size}"
+        )
         appendLine(
             "  итого: задач ${plan.made.size}, файлов в коммите ${plan.changes.size}, " +
                 "коммит один: «${Migration.MESSAGE}»"
@@ -116,8 +126,9 @@ class MigrationSmokeTest {
     fun `сухой прогон показывает весь список того, что изменится`() {
         assumeTrue("нет NOTEAPP_SMOKE_TOKEN — смоук пропущен", token().isNotEmpty())
         val api = client(token())
-        val plan = Migration.plan(snapshot(api))
-        print(report(plan))
+        val files = snapshot(api)
+        val plan = Migration.plan(files)
+        print(report(files, plan))
         // В тестовом репо лежит ровно одна немигрированная заметка (идеи/2026-08-12-…), вторая
         // (встречи/…) уже со ссылками — она в план попасть не должна.
         assertTrue(plan.made.toString(), plan.made.all { it.note.startsWith("идеи/") })
@@ -136,7 +147,7 @@ class MigrationSmokeTest {
         val files = snapshot(api)
         val plan = Migration.plan(files)
         assumeTrue("в репо уже нечего мигрировать", !plan.isEmpty)
-        print(report(plan))
+        print(report(files, plan))
 
         val written = api.commitBatch(plan.changes, Migration.MESSAGE)
         println("МИГРАЦИЯ · коммит ${written.commitSha}")

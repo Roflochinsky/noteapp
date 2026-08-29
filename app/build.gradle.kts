@@ -60,6 +60,13 @@ kotlin { jvmToolchain(17) }
 // showStandardStreams топил эти строки в выводе остальных полутора сотен тестов.
 tasks.withType<Test>().configureEach {
   testLogging { showStandardStreams = false }
+  // Смоуки включаются переменными окружения, а Gradle их входом не считает: пишущий прогон
+  // получал `FROM-CACHE` и выдавал за свой результат прошлого — `clean` тут не спасает, запись
+  // в кэше живёт дольше выходных файлов (ловушка 7 в docs/harness/epic.md, поймана дважды).
+  // Объявляем переменные входом: без них ключ кэша прежний и гейт быстрый, с ними — новый прогон.
+  listOf("NOTEAPP_SMOKE_TOKEN", "NOTEAPP_MIGRATE").forEach { name ->
+    inputs.property(name, providers.environmentVariable(name).orNull).optional(true)
+  }
   addTestOutputListener(
     TestOutputListener { descriptor, event ->
       if (descriptor.className?.endsWith("SmokeTest") == true) print(event.message)
