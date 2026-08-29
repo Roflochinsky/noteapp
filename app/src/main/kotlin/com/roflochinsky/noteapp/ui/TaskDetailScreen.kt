@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -51,6 +53,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -163,7 +166,11 @@ private fun TaskSheet(
     }
 }
 
-/** Проект — из значений, что уже встречаются в задачах, плюс ввод своего (реестр — срез Н3). */
+/**
+ * Проект — из значений, что уже встречаются в задачах. Свободного ввода здесь нет: комп обещает
+ * «новый проект запишется в `projects.md`», а реестра до среза Н3 не существует — вводом рождался
+ * бы проект, которого нет нигде (находка Д7, решение записано в план).
+ */
 @Composable
 private fun ProjectSheet(
     projects: List<String>,
@@ -171,29 +178,14 @@ private fun ProjectSheet(
     onClose: () -> Unit,
     onPick: (String?) -> Unit,
 ) {
-    var typing by remember { mutableStateOf(false) }
-    if (typing) {
-        InputSheet("Новый проект", "tgsum", action = "Выбрать", onDismiss = onClose) {
-            onPick(it.trim())
-            onClose()
-        }
-    } else {
-        ChoiceSheet(
-            title = "Проект",
-            choices =
-                projects.map { Choice(it, it) } +
-                    Choice(null, "Без проекта") +
-                    Choice(NEW_PROJECT, "новый проект"),
-            selected = selected,
-            onDismiss = onClose,
-        ) {
-            if (it == NEW_PROJECT) {
-                typing = true
-            } else {
-                onPick(it)
-                onClose()
-            }
-        }
+    ChoiceSheet(
+        title = "Проект",
+        choices = projects.map { Choice(it, it) } + Choice(null, "Без проекта"),
+        selected = selected,
+        onDismiss = onClose,
+    ) {
+        onPick(it)
+        onClose()
     }
 }
 
@@ -285,15 +277,17 @@ private fun StatusSegment(status: String, onStatus: (String) -> Unit) {
     ) {
         items.forEachIndexed { i, (value, label) ->
             if (i > 0) {
-                Box(Modifier.width(1.dp).height(SEGMENT.dp).background(DocPalette.Line))
+                Box(Modifier.width(1.dp).height(TOUCH.dp).background(DocPalette.Line))
             }
             val on = value == status
             Box(
                 modifier =
                     Modifier.weight(1f)
-                        .clickable { onStatus(value) }
+                        // Роль «переключатель»: TalkBack читает «в работе, выбрано», а не просто
+                        // подпись — иначе состояние `in_progress` на слух неотличимо (вердикт UX).
+                        .selectable(selected = on, role = Role.RadioButton) { onStatus(value) }
                         .background(if (on) DocPalette.BlueSoft else DocPalette.Paper)
-                        .height(SEGMENT.dp),
+                        .height(TOUCH.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -418,7 +412,11 @@ private fun Subtasks(task: TaskFile.Task, onEdit: (Edit) -> Unit, onAdd: () -> U
             Row(
                 modifier =
                     Modifier.fillMaxWidth()
-                        .clickable { onEdit(Edit.ToggleSubtask(sub.text, !sub.done)) }
+                        .toggleable(
+                            value = sub.done,
+                            role = Role.Checkbox,
+                            onValueChange = { onEdit(Edit.ToggleSubtask(sub.text, it)) },
+                        )
                         .height(TOUCH.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -632,7 +630,4 @@ internal fun tagsValue(tags: List<String>): String? =
         .takeIf { it.isNotEmpty() }
         ?.let { "[${it.joinToString(", ")}]" }
 
-private const val TOUCH = 48
-private const val SEGMENT = 48
 private const val TITLE_LINES = 3
-private const val NEW_PROJECT = " новый"

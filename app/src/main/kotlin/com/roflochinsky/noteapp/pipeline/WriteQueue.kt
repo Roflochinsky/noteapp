@@ -23,8 +23,6 @@ class WriteQueue(private val dir: File) {
     fun pending(): List<Op> =
         files().mapNotNull { file -> runCatching { read(file) }.getOrNull() }.toList()
 
-    fun pending(path: String): List<Op> = pending().filter { it.path == path }
-
     fun enqueue(path: String, edit: Edit): Op {
         val now = pending()
         if (edit is Edit.DeleteFile) now.filter { it.path == path }.forEach { drop(it.id) }

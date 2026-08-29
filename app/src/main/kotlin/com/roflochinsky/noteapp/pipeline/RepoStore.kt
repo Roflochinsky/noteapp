@@ -24,6 +24,7 @@ enum class SyncStatus {
  * ponytail: чтение полное (ref + tree + изменившиеся блобы) — репо личное и маленькое; ETag,
  * `compare` и дельта живут в срезе Н7, раньше они экономят то, чего никто не тратит.
  */
+@Suppress("TooManyFunctions") // разделение фасада и отправки — bd nikitatrubaev-0rk.14
 class RepoStore(
     private val cache: RepoCache,
     private val api: GithubApi?,
@@ -166,8 +167,14 @@ class RepoStore(
         }
     }
 
+    /**
+     * Базу правки берём из кэша, а если он путь потерял (холодный старт, чужой коммит унёс его из
+     * дерева) — читаем из git. Молча выбрасывать правку нельзя: янтарное «в очереди» погасло бы,
+     * коммита нет, и владелец об этом не узнал бы. Файла нет вовсе — [readFile] отдаст 404, и это
+     * уже [vanished] с сообщением.
+     */
     private fun sent(api: GithubApi, op: WriteQueue.Op): Push {
-        val entry = snapshot.files[op.path] ?: return drop(op)
+        val entry = snapshot.files[op.path] ?: api.readFile(op.path)
         val content = Edit.apply(entry.text, op.edit)
         val written = api.putFile(op.path, content, message(op), entry.sha)
         accept(op.path, RepoCache.Entry(written.sha ?: entry.sha, content), written.commitSha)
@@ -189,9 +196,11 @@ class RepoStore(
 
     /** 409 — штатная ветка (research §7): перечитать, слить трёхсторонне, переиграть. */
     private fun conflict(api: GithubApi, op: WriteQueue.Op): Push {
-        val base = snapshot.files[op.path] ?: return drop(op)
         if (op.attempt >= ConflictRule.MAX_REPLAYS) return diverged(op, op.edit.fields)
         val theirs = api.readFile(op.path)
+        // Кэш базу потерял — считаем базой то, что сейчас в git: правка ляжет поверх, а не
+        // пропадёт.
+        val base = snapshot.files[op.path] ?: theirs
         val outcome =
             ConflictRule.resolve(
                 base = TaskFile.parse(op.path, base.text),
@@ -218,7 +227,13 @@ class RepoStore(
                     say("Файл ${op.path} уже есть в GitHub — задача не создана")
                     drop(op)
                 } else {
-                    Push.FAILED // забыли sha или кривой автор — наш баг, ретрай не поможет
+                    // Наш баг (забыли sha, кривой автор): ретрай не поможет. Операцию снимаем —
+                    // иначе она встаёт в голову журнала навсегда и запирает всё, что за ней, а
+                    // снять её владельцу нечем: `cancel` живёт пять секунд в снекбаре. Цепочку
+                    // при этом гасим (`FAILED` → `Result.failure()`), чтобы баг был виден.
+                    say("Правку ${op.path} GitHub не принял — она снята, повторите")
+                    drop(op)
+                    Push.FAILED
                 }
             else -> Push.RETRY
         }

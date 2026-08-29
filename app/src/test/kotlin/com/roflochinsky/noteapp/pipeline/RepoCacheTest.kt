@@ -12,6 +12,7 @@ import org.junit.rules.TemporaryFolder
  * Контракт кэша (решения LLD-13 и LLD-23): битое, чужое, старое и прочитанное другим токеном
  * переживается холодным стартом.
  */
+@Suppress("TooManyFunctions") // тестовый класс — список проверок, а не поверхность класса
 class RepoCacheTest {
 
     @get:Rule val tmp = TemporaryFolder()

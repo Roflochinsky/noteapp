@@ -7,6 +7,7 @@ import java.io.IOException
  * текста: меняется вместе с содержимым, как в git. Запись повторяет коды contents API: 409 на
  * устаревший sha, 422 на PUT без sha по занятому пути, 404 на удаление несуществующего.
  */
+@Suppress("TooManyFunctions") // фейк порта повторяет его поверхность целиком
 class FakeGithubApi(
     private val files: MutableMap<String, String> = mutableMapOf(),
     var commitSha: String = "commit-1",

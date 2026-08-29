@@ -15,6 +15,7 @@ import org.junit.rules.TemporaryFolder
  * Запись через фасад: оптимистичный overlay, очередь, обновление кэша из ответа записи и штатная
  * ветка 409 (решения LLD-1, LLD-4, LLD-5, LLD-6). Экран про HTTP не знает.
  */
+@Suppress("TooManyFunctions") // тестовый класс — список проверок, а не поверхность класса
 class RepoStoreWriteTest {
 
     @get:Rule val tmp = TemporaryFolder()
@@ -141,9 +142,15 @@ class RepoStoreWriteTest {
             api.put(path, Edit.apply(api.text(path)!!, Edit.AddSubtask("чужая ${n++}")))
         }
         repeat(ConflictRule.MAX_REPLAYS * 2) { store.push() }
+        val view = store.view()
         assertEquals(RepoStore.Push.EMPTY, store.push())
-        assertFalse("операция должна была уйти из очереди", path in store.view().pending)
-        assertTrue(api.writeCalls <= ConflictRule.MAX_REPLAYS + 1)
+        assertFalse("операция должна была уйти из очереди", path in view.pending)
+        // Ровно попытка на каждое переигрывание плюс первая: `<=` уцелел бы и при пределе 1.
+        assertEquals(ConflictRule.MAX_REPLAYS + 1, api.writeCalls)
+        assertTrue(
+            view.notice.orEmpty(),
+            view.notice.orEmpty().contains("Приоритет") && view.notice!!.contains("GitHub"),
+        )
     }
 
     @Test
@@ -215,6 +222,34 @@ class RepoStoreWriteTest {
         assertTrue(view.notice.orEmpty().contains("больше нет"))
     }
 
+    /** Д1: кэш путь потерял — правка обязана доехать, а не исчезнуть вместе с янтарём. */
+    @Test
+    fun `кэш потерял путь — база берётся из git, правка не пропадает`() {
+        val api = api()
+        val store = store(tmp.newFolder(), api) // без refresh: кэш пуст
+        store.edit(path, Edit.SetField("priority", "P3"))
+        assertEquals(RepoStore.Push.MORE, store.push())
+        assertEquals(RepoStore.Push.EMPTY, store.push())
+        assertTrue(api.text(path)!!, api.text(path)!!.contains("priority: P3"))
+        assertFalse(path in store.view().pending)
+    }
+
+    /** Д2: операция, которую GitHub не принял, снимается — очередь за ней не запирается. */
+    @Test
+    fun `наш баг снимает операцию, а не запирает очередь навсегда`() {
+        val api = api()
+        val store = ready(api)
+        store.edit(path, Edit.SetField("priority", "P3"))
+        store.edit(path, Edit.SetField("due", "2026-08-30"))
+        api.fail = GithubHttpException(UNPROCESSABLE, "Unprocessable Entity")
+        assertEquals(RepoStore.Push.FAILED, store.push())
+        api.fail = null
+        assertEquals("сломанная операция должна уйти из журнала", 1, store.view().pending.size)
+        assertEquals(RepoStore.Push.MORE, store.push())
+        assertEquals(RepoStore.Push.EMPTY, store.push())
+        assertTrue(api.text(path)!!, api.text(path)!!.contains("due: 2026-08-30"))
+    }
+
     @Test
     fun `отмена снекбаром не оставляет коммита`() {
         val api = api()
@@ -265,5 +300,9 @@ class RepoStoreWriteTest {
         assertTrue(text, text.contains("- [x] Воспроизвести баг"))
         assertTrue(text, text.contains("- [ ] Тест на потерю сети"))
         assertTrue("тело файла пересобрано", text.contains("Описание из заметки."))
+    }
+
+    private companion object {
+        const val UNPROCESSABLE = 422
     }
 }

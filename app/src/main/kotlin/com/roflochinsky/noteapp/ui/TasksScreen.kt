@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -40,6 +41,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,6 +53,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -123,12 +128,16 @@ fun TasksScreen(
             }
         }
         undo?.let { id ->
-            // Окно отмены: операция уже в журнале, но воркер стартует, когда снекбар закроется.
+            // Окно отмены: операция уже в журнале, воркер стартует, когда снекбар ушёл — по
+            // таймеру, по «Отменить» или потому, что владелец ушёл с экрана раньше. Планирование
+            // висело на таймере, и уход в деталку до его срабатывания оставлял правку лежать в
+            // журнале до следующей правки или перезапуска (находка Д3). Лишний прогон после
+            // «Отменить» безвреден: очередь пуста, воркер сразу отдаёт success.
             LaunchedEffect(id) {
                 delay(UNDO_MS)
                 undo = null
-                onFlush()
             }
+            DisposableEffect(id) { onDispose { onFlush() } }
             Snack("Сделано", "Отменить", Modifier.align(Alignment.BottomCenter)) {
                 onCancel(id)
                 undo = null
@@ -274,7 +283,7 @@ private fun TaskRow(
         modifier = Modifier.fillMaxWidth().padding(start = 7.5.dp, end = 22.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        TaskCheckbox(task.isDone) { onToggle(task) }
+        TaskCheckbox(task.isDone, task.title) { onToggle(task) }
         Column(
             Modifier.clickable { onTask(task.path) }
                 .fillMaxWidth()
@@ -300,11 +309,16 @@ private fun TaskRow(
     }
 }
 
-/** Визуально 19dp по компу, тач-таргет — 48dp (правило доступности). */
+/**
+ * Визуально 19dp по компу, тач-таргет — 48dp (правило доступности). `toggleable` с ролью — чтобы
+ * TalkBack читал «флажок, отмечено», а не безымянную кнопку (вердикт UX про семантику).
+ */
 @Composable
-private fun TaskCheckbox(done: Boolean, onToggle: () -> Unit) {
+private fun TaskCheckbox(done: Boolean, title: String, onToggle: () -> Unit) {
     Box(
-        Modifier.size(TOUCH.dp).clickable(onClick = onToggle),
+        Modifier.size(TOUCH.dp)
+            .toggleable(value = done, role = Role.Checkbox, onValueChange = { onToggle() })
+            .semantics { contentDescription = "сделана: $title" },
         contentAlignment = Alignment.Center,
     ) {
         Box(
@@ -477,7 +491,6 @@ private fun NewTaskBar(onNewTask: () -> Unit) {
     }
 }
 
-private const val TOUCH = 48
 private const val CLOCK = 13
 private const val VIEWBOX = 24f
 private const val UNDO_MS = 5000L

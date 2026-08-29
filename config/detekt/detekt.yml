@@ -4,13 +4,16 @@ naming:
   FunctionNaming:
     ignoreAnnotated: ['Composable']
 complexity:
-  # Композабл — разметка, а не метод класса: остальные правила ниже его уже не считают.
-  # `ignorePrivate` оставляет правилу его смысл — «класс отвечает за слишком многое»:
-  # меряем публичную поверхность, а не то, на сколько приватных шагов разбита одна ветка
-  # (в `RepoStore` на шаги разложена обработка 409 — так она читается, а не наоборот).
+  # Файлы разметки экранов выведены из-под правила поимённо (решение владельца 2026-08-29,
+  # фактура — журнал docs/plans/2026-08-26-tasks-v2.md): композабл-файл длинный по природе,
+  # это разметка, а не поверхность класса. Общего послабления нет: `ignoreAnnotated` здесь
+  # ключ-пустышка (правило вешает находку на файл или класс, а они не аннотированы), а
+  # `ignorePrivate` глушил ровно те классы, где ревью нашло блокеры.
   TooManyFunctions:
-    ignoreAnnotated: ['Composable']
-    ignorePrivate: true
+    excludes:
+      - '**/ui/TaskSheets.kt'
+      - '**/ui/TaskDetailScreen.kt'
+      - '**/ui/TasksScreen.kt'
   LongMethod:
     ignoreAnnotated: ['Composable']
   CyclomaticComplexMethod:

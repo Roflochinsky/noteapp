@@ -16,6 +16,13 @@ import java.util.concurrent.TimeUnit
  */
 object PipelineQueue {
 
+    /**
+     * Префикс имени цепочки заметки. Цепочка задач (`RepoWriteWorker.CHAIN`) обязана называться
+     * иначе: WorkManager сериализует работу внутри одного уникального имени, и совпади они — правка
+     * задачи задержала бы доставку свежей записи (принцип 2). Сторожит `WorkChainsTest`.
+     */
+    internal const val NOTE_PREFIX = "note-"
+
     private const val BACKOFF_SEC = 30L
 
     fun enqueue(context: Context, noteId: String) {
@@ -33,7 +40,7 @@ object PipelineQueue {
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_SEC, TimeUnit.SECONDS)
                 .build()
         WorkManager.getInstance(context)
-            .beginUniqueWork("note-$noteId", ExistingWorkPolicy.KEEP, transcribe)
+            .beginUniqueWork(NOTE_PREFIX + noteId, ExistingWorkPolicy.KEEP, transcribe)
             .then(push)
             .enqueue()
     }

@@ -44,10 +44,17 @@ class EditTest {
     @Test
     fun `новый ключ встаёт на своё место по ADR, а не в хвост`() {
         val out = Edit.apply(src, Edit.SetField("due", "2026-08-28"))
-        val keys = out.lines().takeWhile { it != "---" || out.lines().indexOf(it) == 0 }
         assertTrue(out, out.contains("created: 2026-08-25\ndue: 2026-08-28\n"))
-        assertTrue(keys.isNotEmpty())
+        // Порядок целиком, а не «ключи вообще есть»: неизвестный `claude_hint` остаётся в хвосте.
+        assertEquals(
+            listOf("title", "project", "priority", "status", "created", "due", "claude_hint"),
+            keys(out),
+        )
     }
+
+    /** Ключи frontmatter в порядке файла. */
+    private fun keys(md: String): List<String> =
+        md.lines().drop(1).takeWhile { it.trim() != "---" }.map { it.substringBefore(':').trim() }
 
     @Test
     fun `пустое значение убирает ключ, остальные не двигаются`() {

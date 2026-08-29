@@ -433,5 +433,4 @@ private fun ChipFace(label: String, on: Boolean, chevron: Boolean) {
     }
 }
 
-private const val TOUCH = 48
 private const val DAY_MS = 86_400_000L

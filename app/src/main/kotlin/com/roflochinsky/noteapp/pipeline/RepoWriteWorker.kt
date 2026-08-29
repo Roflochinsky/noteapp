@@ -60,7 +60,11 @@ class RepoWriteWorker(context: Context, params: WorkerParameters) :
         }
 
     companion object {
-        private const val CHAIN = "repo-write"
+        /**
+         * Имя своей уникальной цепочки; заметки живут в своей (см. `PipelineQueue.NOTE_PREFIX`).
+         */
+        internal const val CHAIN = "repo-write"
+
         private const val PAUSE_MS = 1000L
         private const val BACKOFF_SEC = 30L
 

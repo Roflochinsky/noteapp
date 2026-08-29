@@ -53,6 +53,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+@Suppress("TooManyFunctions") // точка сборки экранов; разбор — bd nikitatrubaev-0rk.14
 class MainActivity : ComponentActivity() {
 
     private sealed interface Screen {

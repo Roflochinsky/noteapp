@@ -95,5 +95,3 @@ fun SyncLine(sync: SyncStatus, onSettings: () -> Unit) {
         )
     }
 }
-
-private const val TOUCH = 48

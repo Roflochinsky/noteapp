@@ -10,6 +10,13 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
+/**
+ * Минимальная сторона тач-таргета в dp (правило доступности). Видимый элемент может быть меньше —
+ * его окружает прозрачная полоса этого размера, как у чекбокса списка. Один на весь пакет: до
+ * фикс-цикла Н2 константа была заведена в четырёх файлах разметки.
+ */
+internal const val TOUCH = 48
+
 /** Мир «Документ» (комп nikitatrubaev-pdj.4): холодная бумага, найви, синий; коралл только REC. */
 object DocPalette {
     val Paper = Color(0xFFFBFBF9)
