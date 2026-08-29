@@ -16,9 +16,8 @@ class RepoCacheTest {
 
     @get:Rule val tmp = TemporaryFolder()
 
-    /** Повторы и «жирный» снимок: рвущаяся запись должна успеть попасть в окно другой. */
-    private val races = 6000
-    private val fat = 400
+    /** Гонка редкая — ловим её повтором, а не сном в боевом коде. */
+    private val races = 3000
 
     private val repo = "Roflochinsky/voice-notes-test"
     private val token = "ghp_stary1Token00000000000000000000000000"
@@ -101,20 +100,22 @@ class RepoCacheTest {
     /**
      * Смена токена, пока воркер тянет очередь: экран уже на новом фасаде, а воркер дописывает свой
      * `doWork()` на старом — два экземпляра кэша над одним каталогом и одним `repo.json.tmp`.
+     * Собственный монитор экземпляра их не разводит: второй `renameTo` не находит временного файла,
+     * унесённого первым, и `readText()` в фолбэке падает FileNotFoundException.
      *
-     * Гонка редкая — ловим её повтором и барьером, а не сном в боевом коде.
+     * Гонка редкая — ловим её повтором, а не сном в боевом коде. Ловится именно числом попыток:
+     * запись побольше ядро само сериализует под замком inode и окно закрывает, поэтому снимки тут
+     * маленькие, а повторов много (замер: 3000 повторов — полсекунды, ловит; 400 повторов записью в
+     * 60 КБ — две секунды и не ловит).
      */
     @Test
     fun `два экземпляра кэша над одним каталогом не мешают друг другу`() {
         val dir = tmp.newFolder()
-        val big =
-            snapshot.copy(
-                files = snapshot.files.mapValues { (_, e) -> e.copy(text = e.text.repeat(fat)) }
-            )
-        val gate = java.util.concurrent.CyclicBarrier(2)
         val boom = java.util.concurrent.atomic.AtomicReference<Throwable>()
+        val gate = java.util.concurrent.CyclicBarrier(2)
         val threads =
-            listOf(cache(dir) to snapshot, cache(dir) to big).map { (cache, what) ->
+            listOf(snapshot, snapshot.copy(commitSha = "чужой коммит")).map { what ->
+                val cache = cache(dir)
                 Thread {
                     repeat(races) {
                         gate.await()
