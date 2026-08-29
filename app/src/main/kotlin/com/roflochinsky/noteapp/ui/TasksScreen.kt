@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -91,6 +92,7 @@ fun TasksScreen(
         Column(Modifier.fillMaxSize()) {
             SectionTabs(Tab.TASKS, TaskFilter.openCount(tasks), onTab, onSettings)
             SyncLine(sync, onSettings)
+            notice?.let { DivergenceLine(it, onNotice) }
             PullToRefreshBox(
                 isRefreshing = refreshing,
                 onRefresh = onRefresh,
@@ -130,19 +132,40 @@ fun TasksScreen(
                 undo = null
             }
         }
-        notice?.let {
-            LaunchedEffect(it) {
-                delay(NOTICE_MS)
-                onNotice()
-            }
-            Snack(it, null, Modifier.align(Alignment.BottomCenter)) { onNotice() }
-        }
     }
 }
 
-/** Единственная поверхность коротких сообщений: снекбар внизу, без модалок и тостов. */
+/**
+ * Расхождение по 409 — непрерывающая плашка под шапкой, рядом со строкой синка: не модалка и не
+ * `Toast`, палитра — янтарь внимания (`err` в этом мире только на кнопке «Удалить»). Владелец
+ * дочитывает её сам или ждёт, пока она уйдёт; список под ней живой.
+ *
+ * Таймер живёт внутри плашки: пока владелец в деталке задачи, она не нарисована — значит и не
+ * истекает, и сообщение дождётся возвращения на список.
+ */
 @Composable
-private fun Snack(text: String, action: String?, modifier: Modifier, onAction: () -> Unit) {
+private fun DivergenceLine(text: String, onDone: () -> Unit) {
+    LaunchedEffect(text) {
+        delay(NOTICE_MS)
+        onDone()
+    }
+    Box(
+        modifier =
+            Modifier.fillMaxWidth()
+                .clickable(onClick = onDone)
+                .heightIn(min = TOUCH.dp)
+                .padding(horizontal = 22.dp, vertical = 8.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Text(text, style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.Amber))
+    }
+}
+
+/**
+ * Снекбар с действием — единственная модалка-не-модалка внизу; сообщения без действия — плашкой.
+ */
+@Composable
+private fun Snack(text: String, action: String, modifier: Modifier, onAction: () -> Unit) {
     Row(
         modifier =
             modifier
@@ -159,17 +182,15 @@ private fun Snack(text: String, action: String?, modifier: Modifier, onAction: (
             style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.OnNav),
             modifier = Modifier.weight(1f),
         )
-        if (action != null) {
-            Text(
-                action.uppercase(),
-                style =
-                    MaterialTheme.typography.labelSmall.copy(
-                        color = DocPalette.OnNav,
-                        fontWeight = FontWeight.Bold,
-                    ),
-                modifier = Modifier.clickable(onClick = onAction).padding(start = 16.dp),
-            )
-        }
+        Text(
+            action.uppercase(),
+            style =
+                MaterialTheme.typography.labelSmall.copy(
+                    color = DocPalette.OnNav,
+                    fontWeight = FontWeight.Bold,
+                ),
+            modifier = Modifier.clickable(onClick = onAction).padding(start = 16.dp),
+        )
     }
 }
 

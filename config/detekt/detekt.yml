@@ -4,6 +4,13 @@ naming:
   FunctionNaming:
     ignoreAnnotated: ['Composable']
 complexity:
+  # Композабл — разметка, а не метод класса: остальные правила ниже его уже не считают.
+  # `ignorePrivate` оставляет правилу его смысл — «класс отвечает за слишком многое»:
+  # меряем публичную поверхность, а не то, на сколько приватных шагов разбита одна ветка
+  # (в `RepoStore` на шаги разложена обработка 409 — так она читается, а не наоборот).
+  TooManyFunctions:
+    ignoreAnnotated: ['Composable']
+    ignorePrivate: true
   LongMethod:
     ignoreAnnotated: ['Composable']
   CyclomaticComplexMethod:

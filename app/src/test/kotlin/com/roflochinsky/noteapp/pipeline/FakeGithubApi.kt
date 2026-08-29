@@ -49,8 +49,17 @@ class FakeGithubApi(
         return commitSha
     }
 
-    override fun readTree(commitSha: String): Map<String, String> =
-        fail?.let { throw it } ?: files.mapValues { sha(it.value) }
+    /**
+     * Дерево спрашивают по SHA коммита — фейк на этом настаивает: подстановка имени ветки или
+     * протухшего SHA здесь падает, а не «работает случайно» (долг Н-7 ревью Н1).
+     */
+    override fun readTree(commitSha: String): Map<String, String> {
+        fail?.let { throw it }
+        if (commitSha != this.commitSha) {
+            throw GithubHttpException(HTTP_NOT_FOUND, "нет коммита $commitSha")
+        }
+        return files.mapValues { sha(it.value) }
+    }
 
     override fun readBlob(sha: String): String {
         fail?.let { throw it }

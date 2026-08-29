@@ -63,7 +63,11 @@ sealed interface Edit {
         /** Порядок ключей из ADR — по нему новый ключ встаёт на своё место, а не в хвост. */
         private val ORDER =
             listOf(TITLE, "project", "priority", STATUS, "source", "created", "due", DONE, "tags")
-        private val CHECKBOX = Regex("""^(\s*[-*]\s*\[)([ xX])(]\s*)(.*)$""")
+        /** Группы именованы: индексы в `groupValues` читаются хуже и ловятся детектом. */
+        private val CHECKBOX =
+            Regex("""^(?<head>\s*[-*]\s*\[)(?<mark>[ xX])(?<tail>]\s*)(?<text>.*)$""")
+
+        private fun MatchResult.part(name: String): String = groups[name]!!.value
 
         fun apply(text: String, edit: Edit): String =
             when (edit) {
@@ -123,11 +127,8 @@ sealed interface Edit {
             val want = normalize(subtask)
             return text.replace("\r\n", "\n").split("\n").joinToString("\n") { line ->
                 val m = CHECKBOX.find(line)
-                if (m != null && normalize(m.groupValues[4]) == want) {
-                    m.groupValues[1] +
-                        (if (done) "x" else " ") +
-                        m.groupValues[3] +
-                        m.groupValues[4]
+                if (m != null && normalize(m.part("text")) == want) {
+                    m.part("head") + (if (done) "x" else " ") + m.part("tail") + m.part("text")
                 } else {
                     line
                 }

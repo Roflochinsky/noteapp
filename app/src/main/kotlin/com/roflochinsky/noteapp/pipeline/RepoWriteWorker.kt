@@ -40,22 +40,18 @@ class RepoWriteWorker(context: Context, params: WorkerParameters) :
                     api = GithubClient(repo, token),
                 )
             var sent = 0
-            var outcome: Result
-            while (true) {
-                val push = store.push()
-                if (push == RepoStore.Push.MORE) {
-                    sent++
-                    delay(PAUSE_MS) // ≥1 с между мутациями — требование доков (research §3.3)
-                    continue
-                }
-                outcome =
-                    when (push) {
-                        RepoStore.Push.EMPTY -> Result.success()
-                        RepoStore.Push.RETRY -> Result.retry()
-                        else -> Result.failure()
-                    }
-                break
+            var push = store.push()
+            while (push == RepoStore.Push.MORE) {
+                sent++
+                delay(PAUSE_MS) // ≥1 с между мутациями — требование доков (research §3.3)
+                push = store.push()
             }
+            val outcome =
+                when (push) {
+                    RepoStore.Push.EMPTY -> Result.success()
+                    RepoStore.Push.RETRY -> Result.retry()
+                    else -> Result.failure()
+                }
             Log.i(Probe.LOG_TAG, "PROBE:WRITE_DONE sent=$sent ${outcome::class.simpleName}")
             outcome
         }

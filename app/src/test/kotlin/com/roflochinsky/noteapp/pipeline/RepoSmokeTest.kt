@@ -3,6 +3,8 @@ package com.roflochinsky.noteapp.pipeline
 import com.roflochinsky.noteapp.ui.TaskFilter
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
@@ -42,6 +44,42 @@ class RepoSmokeTest {
         println("  заметка (кириллица в пути): ${NoteFile.parse("", note.text)?.title}")
     }
 
+    /**
+     * Сквозной цикл среза Н2 против тестового репо: создать задачу → отметить сделанной → удалить.
+     * Трогает только свой файл со штампом времени в имени; чужие файлы `tasks/` не читаются на
+     * запись и не удаляются. После прогона репо возвращается в исходное состояние.
+     */
+    @Test
+    fun `создаёт, правит и удаляет задачу в живом тестовом репо`() {
+        val token = System.getenv("NOTEAPP_SMOKE_TOKEN").orEmpty()
+        assumeTrue("нет NOTEAPP_SMOKE_TOKEN — смоук пропущен", token.isNotEmpty())
+        val store = RepoStore(RepoCache(tmp.newFolder(), repo, token), GithubClient(repo, token))
+        assertEquals(SyncStatus.OK, store.refresh())
+
+        val stamp = System.currentTimeMillis() % STAMP
+        val path = store.create("Смоук записи $stamp", project = "tgsum", priority = "P3")
+        println("СМОУК записи · создаём $path")
+        assertEquals(RepoStore.Push.MORE, store.push())
+        assertEquals(RepoStore.Push.EMPTY, store.push())
+        assertTrue("файл не появился", path in GithubClient(repo, token).let { tree(it) })
+
+        store.setStatus(path, TaskFile.STATUS_DONE)
+        store.edit(path, Edit.AddSubtask("проверить и убрать"))
+        while (store.push() == RepoStore.Push.MORE) Unit
+        val after = GithubClient(repo, token).readFile(path).text
+        println("СМОУК записи · файл после правок:\n$after")
+        assertTrue(after, after.contains("status: done"))
+        assertTrue(after, after.contains("- [ ] проверить и убрать"))
+
+        store.delete(path)
+        assertEquals(RepoStore.Push.MORE, store.push())
+        assertEquals(RepoStore.Push.EMPTY, store.push())
+        assertFalse("файл остался в репо", path in tree(GithubClient(repo, token)))
+        println("СМОУК записи · $path удалён, репо в исходном состоянии")
+    }
+
+    private fun tree(api: GithubApi): Set<String> = api.readTree(api.readRef()).keys
+
     private fun line(task: TaskFile.Task, today: LocalDate): String = buildString {
         append(if (task.isDone) "[x] " else "[ ] ")
         append(task.title)
@@ -54,5 +92,10 @@ class RepoSmokeTest {
             append(" · подзадачи ${task.subtasks.count { it.done }}/${task.subtasks.size}")
         }
         append(" · ${task.path}")
+    }
+
+    private companion object {
+        /** Хвост миллисекунд в имени файла — чтобы два прогона подряд не столкнулись. */
+        const val STAMP = 1_000_000L
     }
 }
