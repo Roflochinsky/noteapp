@@ -18,8 +18,15 @@ object TaskFile {
     const val PRIORITY_DEFAULT = "P2"
     const val DIR = "tasks/"
 
-    private val KNOWN =
-        setOf("title", "project", "priority", "status", "source", "created", "due", "done", "tags")
+    /**
+     * Порядок и набор ключей frontmatter задачи — единственное место в коде, где они записаны (сама
+     * схема живёт в ADR). Отсюда их берут и сборка файла, и вставка ключа построчной правкой
+     * ([Edit]), и сравнение на 409 ([ConflictRule]).
+     */
+    val KEYS =
+        listOf("title", "project", "priority", "status", "source", "created", "due", "done", "tags")
+
+    private val KNOWN = KEYS.toSet()
     private val CHECKBOX = Regex("""^\s*[-*]\s*\[([ xX])]\s*(.*)$""")
 
     data class Subtask(val text: String, val done: Boolean)
@@ -68,20 +75,30 @@ object TaskFile {
     }
 
     fun build(task: Task): String {
-        val f = LinkedHashMap<String, String>()
-        f["title"] = task.title
-        task.project?.let { f["project"] = it }
-        f["priority"] = task.priority
-        f["status"] = task.status
-        task.source?.let { f["source"] = it }
-        task.created?.let { f["created"] = it.toString() }
-        task.due?.let { f["due"] = it.toString() }
-        task.done?.let { f["done"] = it.toString() }
-        if (task.tags.isNotEmpty()) f["tags"] = Frontmatter.inline(task.tags)
-        f.putAll(task.extra)
         val body = task.body.trim()
-        return Frontmatter.render(f) + if (body.isEmpty()) "" else "\n$body\n"
+        return Frontmatter.render(fields(task)) + if (body.isEmpty()) "" else "\n$body\n"
     }
+
+    /**
+     * Frontmatter задачи картой в каноничном порядке [KEYS]: пустых полей в ней нет — «поле
+     * опускается, если его нет» (ADR). Неизвестные ключи идут следом, как в файле.
+     */
+    fun fields(task: Task): Map<String, String> =
+        KEYS.mapNotNull { key -> value(task, key)?.let { key to it } }.toMap() + task.extra
+
+    private fun value(task: Task, key: String): String? =
+        when (key) {
+            "title" -> task.title
+            "project" -> task.project
+            "priority" -> task.priority
+            "status" -> task.status
+            "source" -> task.source
+            "created" -> task.created?.toString()
+            "due" -> task.due?.toString()
+            "done" -> task.done?.toString()
+            "tags" -> task.tags.takeIf { it.isNotEmpty() }?.let(Frontmatter::inline)
+            else -> null
+        }
 
     /**
      * Имя файла задачи: дата создания + транслит-слаг, при коллизии — суффикс (решение LLD-15).

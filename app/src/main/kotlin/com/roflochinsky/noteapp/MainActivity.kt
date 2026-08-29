@@ -70,6 +70,7 @@ class MainActivity : ComponentActivity() {
     private var notes by mutableStateOf(listOf<NotesStore.Note>())
     private var tasks by mutableStateOf(listOf<TaskFile.Task>())
     private var pendingPaths by mutableStateOf(emptySet<String>())
+    private var revision = ""
     private var notice by mutableStateOf<String?>(null)
     private var newTaskOpen by mutableStateOf(false)
     private var watching = false
@@ -170,13 +171,17 @@ class MainActivity : ComponentActivity() {
                 BackHandler { back() }
                 val task = tasks.firstOrNull { it.path == s.path }
                 if (task == null) {
-                    back()
+                    // Задачи больше нет (удалили или унесло обновлением): уходим на список
+                    // эффектом — писать в state прямо в теле композиции нельзя.
+                    LaunchedEffect(s.path) { back() }
                 } else {
                     TaskDetailScreen(
                         task = task,
                         projects = projects(),
                         pending = s.path in pendingPaths,
                         today = LocalDate.now(),
+                        notice = notice,
+                        onNotice = { notice = null },
                         onEdit = { edit -> write(scope) { it.edit(s.path, edit) } },
                         onStatus = { status -> write(scope) { it.setStatus(s.path, status) } },
                         onDelete = {
@@ -255,17 +260,22 @@ class MainActivity : ComponentActivity() {
     /** Список и «в очереди» пересчитываются из кэша и журнала — вне главного потока. */
     private suspend fun reload() {
         val store = repoStore ?: return
-        val fresh =
-            withContext(Dispatchers.IO) {
-                Triple(store.tasks(), store.pendingPaths(), store.takeDivergence())
-            }
-        tasks = fresh.first
-        pendingPaths = fresh.second
-        fresh.third?.let { notice = it }
+        show(withContext(Dispatchers.IO) { store.view() })
         watchQueue()
     }
 
-    /** Пока очередь не пуста — тикаем раз в секунду, чтобы янтарь сменился зеленью сам. */
+    private fun show(fresh: RepoStore.View) {
+        revision = fresh.revision
+        tasks = fresh.tasks
+        pendingPaths = fresh.pending
+        fresh.notice?.let { notice = it }
+    }
+
+    /**
+     * Пока очередь не пуста — тикаем раз в секунду, чтобы янтарь сменился зеленью сам. Репо-кэш в
+     * секундный поллинг не попадает (вердикт UX): тик читает дешёвую метку и пересобирает список
+     * задач, только если кэш или журнал действительно изменились.
+     */
     private fun watchQueue() {
         if (watching || pendingPaths.isEmpty()) return
         watching = true
@@ -273,13 +283,12 @@ class MainActivity : ComponentActivity() {
             while (pendingPaths.isNotEmpty()) {
                 delay(POLL_MS)
                 val store = repoStore ?: break
+                // Метка дешёвая: каталог очереди и время файла кэша. Не сменилась — не парсим.
                 val fresh =
                     withContext(Dispatchers.IO) {
-                        Triple(store.tasks(), store.pendingPaths(), store.takeDivergence())
+                        if (store.revision() == revision) null else store.view()
                     }
-                tasks = fresh.first
-                pendingPaths = fresh.second
-                fresh.third?.let { notice = it }
+                fresh?.let { show(it) }
             }
             watching = false
         }

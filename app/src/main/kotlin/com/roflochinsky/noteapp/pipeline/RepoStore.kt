@@ -39,15 +39,46 @@ class RepoStore(
         FAILED,
     }
 
-    private var snapshot = cache.load()
+    /**
+     * Снимок читается через кэш, а не в конструктор: экранный экземпляр и экземпляр воркера записи
+     * держат один и тот же кэш, и экран обязан увидеть коммит воркера — иначе галочка отскакивает в
+     * «Открыта» (решение LLD-5).
+     */
+    private val snapshot: RepoCache.Snapshot
+        get() = cache.snapshot()
 
-    /** Задачи из кэша поверх ожидающих правок — рисуются мгновенно, без сети (решение LLD-12). */
-    fun tasks(): List<TaskFile.Task> = overlay().map { (path, text) -> TaskFile.parse(path, text) }
+    /**
+     * Всё, что экран рисует прямо сейчас: задачи из кэша поверх ожидающих правок (решение LLD-5),
+     * пути в янтарном «в очереди» и разовое сообщение о расхождении. Один вызов, а не четыре: иначе
+     * половина снимка успевает устареть, пока читается вторая.
+     */
+    data class View(
+        val revision: String,
+        val tasks: List<TaskFile.Task>,
+        val pending: Set<String>,
+        val notice: String?,
+    )
 
-    /** Пути, ждущие отправки: в мета-строке и в деталке это янтарное «в очереди». */
+    fun view(): View {
+        val ops = queue.pending()
+        return View(
+            revision = revision(ops),
+            tasks = overlay(ops).map { (path, text) -> TaskFile.parse(path, text) },
+            pending = ops.map { it.path }.toSet(),
+            notice = takeDivergence(),
+        )
+    }
+
+    /**
+     * Дешёвая метка того, что видно на экране: кэш плюс журнал. Не изменилась — пересобирать список
+     * не из чего, и репо-кэш остаётся вне секундного поллинга (вердикт UX).
+     */
+    fun revision(): String = revision(queue.pending())
+
+    /** Пути, ждущие отправки: по ним экран решает, заводить ли воркер после перезапуска. */
     fun pendingPaths(): Set<String> = queue.pending().map { it.path }.toSet()
 
-    fun edit(path: String, edit: Edit): String = queue.enqueue(path, edit, sha(path)).id
+    fun edit(path: String, edit: Edit): String = queue.enqueue(path, edit).id
 
     /** Дата закрытия ставится вместе со статусом — считает её store, а не экран. */
     fun setStatus(path: String, status: String): String =
@@ -74,7 +105,7 @@ class RepoStore(
                     tags = tags,
                 )
             )
-        queue.enqueue(path, Edit.CreateTask(text), null)
+        queue.enqueue(path, Edit.CreateTask(text))
         return path
     }
 
@@ -83,8 +114,8 @@ class RepoStore(
     /** Отмена снекбаром до отправки: операция снимается, второго коммита не будет. */
     fun cancel(id: String) = queue.cancel(id)
 
-    /** Расхождение по 409 показывается один раз и снекбаром, не модалкой (вердикт UX). */
-    fun takeDivergence(): String? {
+    /** Расхождение по 409 показывается один раз и плашкой, не модалкой (вердикт UX). */
+    private fun takeDivergence(): String? {
         val file = File(cache.dir, DIVERGENCE)
         val text = file.takeIf { it.exists() }?.readText()?.takeIf { it.isNotBlank() }
         file.delete()
@@ -97,16 +128,16 @@ class RepoStore(
             val commit = api.readRef()
             val tree = api.readTree(commit)
             val waiting = queue.pending().map { it.path }.toSet()
+            val known = snapshot.files
             val files =
                 tree
                     .filterKeys { isTask(it) }
                     .mapValues { (path, sha) ->
                         // Путь с ожидающей правкой не перечитываем: кэш держит базу слияния.
-                        snapshot.files[path]?.takeIf { it.sha == sha || path in waiting }
+                        known[path]?.takeIf { it.sha == sha || path in waiting }
                             ?: RepoCache.Entry(sha, api.readBlob(sha))
                     }
-            snapshot = RepoCache.Snapshot(commit, files)
-            cache.save(snapshot)
+            cache.save(RepoCache.Snapshot(commit, files))
             SyncStatus.OK
         } catch (e: GithubHttpException) {
             status(e)
@@ -152,8 +183,7 @@ class RepoStore(
     private fun gone(api: GithubApi, op: WriteQueue.Op): Push {
         val sha = snapshot.files[op.path]?.sha ?: api.readFile(op.path).sha
         val written = api.deleteFile(op.path, message(op), sha)
-        snapshot = snapshot.copy(commitSha = written.commitSha, files = snapshot.files - op.path)
-        cache.save(snapshot)
+        forget(op.path, written.commitSha)
         return drop(op)
     }
 
@@ -171,7 +201,8 @@ class RepoStore(
         accept(op.path, theirs, snapshot.commitSha)
         return when (outcome) {
             is ConflictRule.Divergence -> diverged(op, outcome.fields)
-            is ConflictRule.Merged -> {
+            // Правки не пересеклись: переигрываем ту же Edit поверх свежего текста.
+            ConflictRule.Merged -> {
                 queue.retry(op)
                 Push.MORE
             }
@@ -181,8 +212,7 @@ class RepoStore(
     private fun http(api: GithubApi, op: WriteQueue.Op, e: GithubHttpException): Push =
         when (e.code) {
             HTTP_CONFLICT -> conflict(api, op)
-            // Путь уехал (Action перенёс или файла уже нет) — правку выбрасываем, не воскрешаем.
-            HTTP_NOT_FOUND -> drop(op)
+            HTTP_NOT_FOUND -> vanished(op)
             HTTP_UNPROCESSABLE ->
                 if (op.edit is Edit.CreateTask) {
                     say("Файл ${op.path} уже есть в GitHub — задача не создана")
@@ -193,8 +223,19 @@ class RepoStore(
             else -> Push.RETRY
         }
 
+    /**
+     * Путь уехал (Action перенёс или файла уже нет): правку выбрасываем, файл не воскрешаем, а
+     * карту приводим в чувство — иначе владелец продолжает видеть задачу, которой в репо нет
+     * (решение LLD-8).
+     */
+    private fun vanished(op: WriteQueue.Op): Push {
+        forget(op.path, snapshot.commitSha)
+        say("Задачи ${op.path} в GitHub больше нет — правка не применена")
+        return drop(op)
+    }
+
     private fun diverged(op: WriteQueue.Op, fields: List<String>): Push {
-        val named = fields.filter { it != TaskFile.STATUS_DONE || fields.size == 1 }
+        val named = fields.filter { it != Edit.DONE || fields.size == 1 }
         say(
             if (named.isEmpty()) {
                 "Задача изменилась в GitHub — правка не применена"
@@ -218,17 +259,24 @@ class RepoStore(
 
     private fun accept(path: String, entry: RepoCache.Entry, commitSha: String) {
         // Кэш обновляется из ответа записи: отдельный опрос ref не нужен (решение LLD-4).
-        snapshot = snapshot.copy(commitSha = commitSha, files = snapshot.files + (path to entry))
-        cache.save(snapshot)
+        val was = snapshot
+        cache.save(was.copy(commitSha = commitSha, files = was.files + (path to entry)))
     }
 
+    /** Пути в репо больше нет: убираем его из карты, чтобы владелец не видел призрак. */
+    private fun forget(path: String, commitSha: String) {
+        val was = snapshot
+        cache.save(was.copy(commitSha = commitSha, files = was.files - path))
+    }
+
+    private fun revision(ops: List<WriteQueue.Op>): String =
+        cache.stamp() + ops.joinToString(",") { "${it.id}#${it.attempt}" }
+
     /** Кэш + журнал: то, что владелец видит на экране прямо сейчас. */
-    private fun overlay(): Map<String, String> {
+    private fun overlay(ops: List<WriteQueue.Op>): Map<String, String> {
         val texts = LinkedHashMap<String, String>()
         snapshot.files.filterKeys { isTask(it) }.forEach { (path, e) -> texts[path] = e.text }
-        queue
-            .pending()
-            .filter { isTask(it.path) }
+        ops.filter { isTask(it.path) }
             .forEach { op ->
                 when (val edit = op.edit) {
                     Edit.DeleteFile -> texts.remove(op.path)
@@ -238,8 +286,6 @@ class RepoStore(
             }
         return texts
     }
-
-    private fun sha(path: String): String? = snapshot.files[path]?.sha
 
     private fun isTask(path: String): Boolean =
         path.startsWith(TaskFile.DIR) && path.endsWith(".md")

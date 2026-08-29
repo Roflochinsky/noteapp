@@ -51,6 +51,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextDecoration
@@ -73,6 +75,8 @@ fun TaskDetailScreen(
     projects: List<String>,
     pending: Boolean,
     today: LocalDate,
+    notice: String?,
+    onNotice: () -> Unit,
     onEdit: (Edit) -> Unit,
     onStatus: (String) -> Unit,
     onDelete: () -> Unit,
@@ -89,6 +93,9 @@ fun TaskDetailScreen(
             onTitle = { onEdit(Edit.SetTitle(it)) },
             onBack = onBack,
         )
+        // Расхождение по 409 показывается и здесь, а не только на списке (решение LLD-12):
+        // правку владелец делает в деталке — здесь же он и узнаёт, что git её не принял.
+        notice?.let { DivergenceLine(it, onNotice) }
         StatusSegment(task.status, onStatus)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Fields(task, today, onEdit) { sheet = it }
@@ -285,7 +292,7 @@ private fun StatusSegment(status: String, onStatus: (String) -> Unit) {
                 modifier =
                     Modifier.weight(1f)
                         .clickable { onStatus(value) }
-                        .background(if (on) BLUE_SOFT else DocPalette.Paper)
+                        .background(if (on) DocPalette.BlueSoft else DocPalette.Paper)
                         .height(SEGMENT.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -325,25 +332,26 @@ private fun Fields(
         ) {
             onSheet(Sheet.DUE)
         }
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             FieldLabel("Теги")
             FlowRow(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).padding(vertical = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 task.tags.forEach { tag ->
                     RemovableTag(tag) { onEdit(Edit.SetField("tags", tagsValue(task.tags - tag))) }
                 }
-                Text(
-                    "+ тег",
-                    style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.Blue),
-                    modifier =
-                        Modifier.clickable { onSheet(Sheet.TAG) }
-                            .padding(horizontal = 4.dp, vertical = 6.dp),
-                )
+                Box(
+                    modifier = Modifier.height(TOUCH.dp).clickable { onSheet(Sheet.TAG) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "+ тег",
+                        style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.Blue),
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    )
+                }
             }
         }
         HorizontalDivider(color = DocPalette.Line)
@@ -470,8 +478,10 @@ private fun SubCheckbox(done: Boolean) {
 }
 
 /**
- * ponytail: ссылка на источник ведёт в GitHub — открытие заметки внутри приложения требует
- * тождества «путь в репо ↔ локальная запись» (NoteRef), оно приходит со срезом ленты Н5.
+ * Ссылка на источник ведёт в GitHub: открытие заметки внутри приложения требует тождества «путь в
+ * репо ↔ локальная запись» (`NoteRef`, решение LLD-10) и текста заметки в кэше, а кэш держит только
+ * `tasks/`. И то и другое приходит срезом ленты Н5 — решение записано в плане (журнал 2026-08-29),
+ * критерий 6 спеки до Н5 закрыт наполовину.
  */
 @Composable
 private fun Source(source: String, onOpen: (String) -> Unit) {
@@ -566,7 +576,7 @@ private fun ActionButton(
             modifier
                 .border(
                     1.dp,
-                    if (color == DocPalette.Err) ERR_BORDER else DocPalette.Line,
+                    if (color == DocPalette.Err) DocPalette.ErrLine else DocPalette.Line,
                     RoundedCornerShape(12.dp),
                 )
                 .clickable(onClick = onClick)
@@ -580,22 +590,35 @@ private fun ActionButton(
     }
 }
 
-/** Крестик у тега рисуется в самом чипе — отдельного режима правки нет. */
+/**
+ * Крестик у тега рисуется в самом чипе — отдельного режима правки нет. Чип по компу низкий
+ * (`.tagchip`, 4/10px), поэтому тач-таргет прозрачный и накрывает чип целиком по высоте — тот же
+ * приём, что у чекбокса списка. Сносит тег только сторона крестика: случайный тап по тексту тег не
+ * убивает, а подтверждения у такой мелочи быть не должно.
+ */
 @Composable
 private fun RemovableTag(tag: String, onRemove: () -> Unit) {
-    Row(
-        modifier =
-            Modifier.background(DocPalette.Paper2, RoundedCornerShape(8.dp))
+    Box(contentAlignment = Alignment.Center) {
+        Row(
+            modifier =
+                Modifier.background(DocPalette.Paper2, RoundedCornerShape(8.dp))
+                    .padding(start = 10.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("#$tag", style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.Ink))
+            // Подпись для TalkBack висит на тач-таргете ниже — крестик её не дублирует.
+            Icon(
+                Icons.Filled.Close,
+                contentDescription = null,
+                tint = DocPalette.Mut,
+                modifier = Modifier.size(12.dp).padding(start = 2.dp),
+            )
+        }
+        Box(
+            Modifier.align(Alignment.CenterEnd)
+                .size(TOUCH.dp)
                 .clickable(onClick = onRemove)
-                .padding(start = 10.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("#$tag", style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.Ink))
-        Icon(
-            Icons.Filled.Close,
-            contentDescription = "убрать тег",
-            tint = DocPalette.Mut,
-            modifier = Modifier.size(12.dp).padding(start = 2.dp),
+                .semantics { contentDescription = "убрать тег #$tag" }
         )
     }
 }
@@ -610,8 +633,6 @@ internal fun tagsValue(tags: List<String>): String? =
         ?.let { "[${it.joinToString(", ")}]" }
 
 private const val TOUCH = 48
-private const val SEGMENT = 44
+private const val SEGMENT = 48
 private const val TITLE_LINES = 3
 private const val NEW_PROJECT = " новый"
-private val BLUE_SOFT = Color(0x1A3A6FB8)
-private val ERR_BORDER = Color(0x33B3261E)

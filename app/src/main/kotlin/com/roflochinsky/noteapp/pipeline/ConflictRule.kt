@@ -1,13 +1,16 @@
 package com.roflochinsky.noteapp.pipeline
 
-import java.time.LocalDate
-
 /**
  * Трёхстороннее слияние задачи на 409 (решения LLD-2 и LLD-3). Вход — разобранные структуры: `base`
  * — то, на чём владелец правил, `mine` — его результат, `theirs` — то, что сейчас в git.
  *
  * Разные поля — сливаем молча; одно и то же поле с двух сторон — побеждает git, владельцу
  * показывается расхождение (ADR app-writes-to-repo: с той стороны обычно Action с саммари).
+ *
+ * Правило отдаёт только вердикт. Слитый файл собирает не оно, а переигрывание `Edit` поверх свежего
+ * текста в [RepoStore]: так тело файла не пересобирается и неизвестные ключи остаются на месте
+ * (решение LLD-9). Собранная здесь задача была бы вторым, расходящимся способом получить тот же
+ * файл — его убрали 2026-08-29 в фикс-цикле Н2.
  */
 object ConflictRule {
 
@@ -19,7 +22,8 @@ object ConflictRule {
 
     sealed interface Result
 
-    data class Merged(val task: TaskFile.Task) : Result
+    /** Правки не пересеклись — операцию можно переиграть на свежем тексте. */
+    data object Merged : Result
 
     data class Divergence(val fields: List<String>) : Result
 
@@ -27,20 +31,14 @@ object ConflictRule {
         val b = view(base)
         val m = view(mine)
         val t = view(theirs)
-        val merged = LinkedHashMap<String, String?>()
-        val diverged = mutableListOf<String>()
-        for (key in b.keys + m.keys + t.keys) {
-            val mv = m[key]
-            val tv = t[key]
-            when {
-                mv == tv -> merged[key] = tv
-                mv == b[key] -> merged[key] = tv
-                tv == b[key] -> merged[key] = mv
-                else -> diverged += key
+        val diverged =
+            (b.keys + m.keys + t.keys).filter { key ->
+                val mv = m[key]
+                val tv = t[key]
+                // Разошлись только если поле тронули с обеих сторон и по-разному.
+                mv != tv && mv != b[key] && tv != b[key]
             }
-        }
-        if (diverged.isNotEmpty()) return Divergence(diverged)
-        return Merged(task(theirs, merged, subtasks(base, mine, theirs)))
+        return if (diverged.isEmpty()) Merged else Divergence(diverged)
     }
 
     /** Человеческое имя поля для строки расхождения. */
@@ -59,19 +57,13 @@ object ConflictRule {
             else -> field
         }
 
-    /** Задача как плоская карта «ключ → значение»: frontmatter по ключам плюс описание. */
+    /**
+     * Задача плоской картой «ключ → значение»: frontmatter в наборе и порядке [TaskFile.KEYS] плюс
+     * описание. Подзадачи в сравнение не входят — их сводит переигрывание правки по тексту.
+     */
     private fun view(t: TaskFile.Task): Map<String, String?> = buildMap {
-        put("title", t.title)
-        put("project", t.project)
-        put("priority", t.priority)
-        put("status", t.status)
-        put("source", t.source)
-        put("created", t.created?.toString())
-        put("due", t.due?.toString())
-        put("done", t.done?.toString())
-        put("tags", t.tags.joinToString(", ").ifEmpty { null })
+        putAll(TaskFile.fields(t))
         put(DESCRIPTION, description(t.body).ifEmpty { null })
-        putAll(t.extra)
     }
 
     /**
@@ -85,75 +77,6 @@ object ConflictRule {
             .filterNot { it.trim().equals(Edit.SUBTASKS_HEADING, ignoreCase = true) }
             .joinToString("\n")
             .trim()
-
-    /**
-     * Подзадачи сопоставляются по нормализованному тексту: чужой порядок и удаление — правда git.
-     */
-    private fun subtasks(
-        base: TaskFile.Task,
-        mine: TaskFile.Task,
-        theirs: TaskFile.Task,
-    ): List<TaskFile.Subtask> {
-        val key = { s: TaskFile.Subtask -> Edit.normalize(s.text) }
-        val b = base.subtasks.associateBy(key)
-        val m = mine.subtasks.associateBy(key)
-        val kept =
-            theirs.subtasks.map { their ->
-                val k = key(their)
-                val mineDone = m[k]?.done
-                val baseDone = b[k]?.done
-                if (mineDone != null && mineDone != baseDone) their.copy(done = mineDone) else their
-            }
-        val added = mine.subtasks.filter { key(it) !in b && key(it) !in theirs.subtasks.map(key) }
-        return kept + added
-    }
-
-    private fun task(
-        theirs: TaskFile.Task,
-        f: Map<String, String?>,
-        subtasks: List<TaskFile.Subtask>,
-    ): TaskFile.Task {
-        val known =
-            setOf(
-                "title",
-                "project",
-                "priority",
-                "status",
-                "source",
-                "created",
-                "due",
-                "done",
-                "tags",
-                DESCRIPTION,
-            )
-        return theirs.copy(
-            title = f["title"].orEmpty(),
-            project = f["project"],
-            priority = f["priority"] ?: TaskFile.PRIORITY_DEFAULT,
-            status = f["status"] ?: TaskFile.STATUS_OPEN,
-            source = f["source"],
-            created = date(f["created"]),
-            due = date(f["due"]),
-            done = date(f["done"]),
-            tags = f["tags"].orEmpty().split(",").map { it.trim() }.filter { it.isNotEmpty() },
-            body = body(f[DESCRIPTION].orEmpty(), subtasks),
-            subtasks = subtasks,
-            extra = f.filterKeys { it !in known }.mapValues { it.value.orEmpty() },
-        )
-    }
-
-    private fun body(description: String, subtasks: List<TaskFile.Subtask>): String =
-        buildList {
-                if (description.isNotEmpty()) add(description)
-                if (subtasks.isNotEmpty()) {
-                    add(Edit.SUBTASKS_HEADING)
-                    subtasks.forEach { add("- [${if (it.done) "x" else " "}] ${it.text}") }
-                }
-            }
-            .joinToString("\n")
-
-    private fun date(value: String?): LocalDate? =
-        value?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
 
     private val CHECKBOX = Regex("""^\s*[-*]\s*\[[ xX]]\s*.*$""")
 }

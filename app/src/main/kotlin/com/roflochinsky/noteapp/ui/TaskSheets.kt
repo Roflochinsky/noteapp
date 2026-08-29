@@ -383,9 +383,22 @@ fun NewTaskSheet(
     }
 }
 
-/** Чип по компу: рамка, активный — синий на подложке; шеврон у тех, что открывают выбор. */
+/**
+ * Чип по компу: рамка, активный — синий на подложке; шеврон у тех, что открывают выбор. Сам чип
+ * низкий (комп), поэтому кликается прозрачная полоса в 48dp вокруг него — приём чекбокса списка.
+ */
 @Composable
 private fun Chip(label: String, on: Boolean, chevron: Boolean = false, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier.height(TOUCH.dp).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        ChipFace(label, on, chevron)
+    }
+}
+
+@Composable
+private fun ChipFace(label: String, on: Boolean, chevron: Boolean) {
     Row(
         modifier =
             Modifier.border(
@@ -393,8 +406,10 @@ private fun Chip(label: String, on: Boolean, chevron: Boolean = false, onClick: 
                     if (on) DocPalette.Blue else DocPalette.Line,
                     RoundedCornerShape(9.dp),
                 )
-                .background(if (on) BLUE_SOFT else DocPalette.Paper, RoundedCornerShape(9.dp))
-                .clickable(onClick = onClick)
+                .background(
+                    if (on) DocPalette.BlueSoft else DocPalette.Paper,
+                    RoundedCornerShape(9.dp),
+                )
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -420,4 +435,3 @@ private fun Chip(label: String, on: Boolean, chevron: Boolean = false, onClick: 
 
 private const val TOUCH = 48
 private const val DAY_MS = 86_400_000L
-private val BLUE_SOFT = androidx.compose.ui.graphics.Color(0x1A3A6FB8)

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -144,7 +146,7 @@ fun TasksScreen(
  * истекает, и сообщение дождётся возвращения на список.
  */
 @Composable
-private fun DivergenceLine(text: String, onDone: () -> Unit) {
+internal fun DivergenceLine(text: String, onDone: () -> Unit) {
     LaunchedEffect(text) {
         delay(NOTICE_MS)
         onDone()
@@ -173,7 +175,8 @@ private fun Snack(text: String, action: String, modifier: Modifier, onAction: ()
                 .padding(16.dp)
                 .navigationBarsPadding()
                 .background(DocPalette.Nav, RoundedCornerShape(12.dp))
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                .heightIn(min = TOUCH.dp)
+                .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
@@ -189,7 +192,12 @@ private fun Snack(text: String, action: String, modifier: Modifier, onAction: ()
                     color = DocPalette.OnNav,
                     fontWeight = FontWeight.Bold,
                 ),
-            modifier = Modifier.clickable(onClick = onAction).padding(start = 16.dp),
+            // Тач-таргет действия — вся высота снекбара (не меньше 48dp), а не кегль подписи.
+            modifier =
+                Modifier.clickable(onClick = onAction)
+                    .fillMaxHeight()
+                    .padding(start = 16.dp)
+                    .wrapContentHeight(),
         )
     }
 }
@@ -461,6 +469,11 @@ private fun NewTaskBar(onNewTask: () -> Unit) {
             Spacer(Modifier.width(10.dp))
             Text("Новая задача")
         }
+        Text(
+            "задача станет файлом в tasks/ и уйдёт коммитом",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(top = 8.dp),
+        )
     }
 }
 

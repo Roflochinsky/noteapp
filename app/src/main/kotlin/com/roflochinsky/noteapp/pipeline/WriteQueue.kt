@@ -9,19 +9,15 @@ import org.json.JSONObject
  * задаёт порядок. WorkManager Data сюда не годится — 10 КБ на всё и потеря операции при перезапуске
  * цепочки; файл переживает убитый процесс.
  *
+ * Базы слияния операция не несёт: ею служит запись кэша по этому пути (уточнение LLD-1 от
+ * 2026-08-29, обоснование в плане). `baseSha` из файлов старого формата просто игнорируется.
+ *
  * Склейка — по паре «путь + цель правки»: два тапа по одному чекбоксу дают одну операцию (побеждает
  * последняя), а правка соседнего поля живёт своей.
  */
 class WriteQueue(private val dir: File) {
 
-    data class Op(
-        val id: String,
-        val path: String,
-        val edit: Edit,
-        /** SHA текста, на котором владелец правил, — база трёхстороннего слияния. */
-        val baseSha: String?,
-        val attempt: Int = 0,
-    )
+    data class Op(val id: String, val path: String, val edit: Edit, val attempt: Int = 0)
 
     /** Операции в порядке появления; битые файлы пропускаются, а не роняют очередь. */
     fun pending(): List<Op> =
@@ -29,11 +25,11 @@ class WriteQueue(private val dir: File) {
 
     fun pending(path: String): List<Op> = pending().filter { it.path == path }
 
-    fun enqueue(path: String, edit: Edit, baseSha: String?): Op {
+    fun enqueue(path: String, edit: Edit): Op {
         val now = pending()
         if (edit is Edit.DeleteFile) now.filter { it.path == path }.forEach { drop(it.id) }
         val same = now.firstOrNull { it.path == path && it.edit.target == edit.target }
-        val op = Op(same?.id ?: nextId(), path, edit, baseSha)
+        val op = Op(same?.id ?: nextId(), path, edit)
         write(op)
         return op
     }
@@ -63,7 +59,6 @@ class WriteQueue(private val dir: File) {
         val json =
             JSONObject()
                 .put("path", op.path)
-                .put("baseSha", op.baseSha ?: JSONObject.NULL)
                 .put("attempt", op.attempt)
                 .put("edit", encode(op.edit))
         val tmp = File(dir, "${op.id}$EXT.tmp")
@@ -81,7 +76,6 @@ class WriteQueue(private val dir: File) {
             id = file.name.removeSuffix(EXT),
             path = json.getString("path"),
             edit = decode(json.getJSONObject("edit")),
-            baseSha = json.optString("baseSha").takeIf { it.isNotEmpty() },
             attempt = json.optInt("attempt"),
         )
     }

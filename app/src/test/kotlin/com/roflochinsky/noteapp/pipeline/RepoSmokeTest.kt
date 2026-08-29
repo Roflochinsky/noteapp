@@ -32,7 +32,7 @@ class RepoSmokeTest {
         val store = RepoStore(RepoCache(tmp.newFolder(), repo, token), GithubClient(repo, token))
         assertEquals(SyncStatus.OK, store.refresh())
         val today = LocalDate.now()
-        val tasks = store.tasks()
+        val tasks = store.view().tasks
         println("СМОУК $repo · задач: ${tasks.size}")
         TaskFilter.byPriority(tasks, today).forEach { (priority, group) ->
             println("  $priority:")

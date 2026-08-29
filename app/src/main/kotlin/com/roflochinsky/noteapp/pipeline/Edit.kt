@@ -60,9 +60,6 @@ sealed interface Edit {
         const val DONE = "done"
         const val SUBTASKS_HEADING = "## Подзадачи"
 
-        /** Порядок ключей из ADR — по нему новый ключ встаёт на своё место, а не в хвост. */
-        private val ORDER =
-            listOf(TITLE, "project", "priority", STATUS, "source", "created", "due", DONE, "tags")
         /** Группы именованы: индексы в `groupValues` читаются хуже и ловятся детектом. */
         private val CHECKBOX =
             Regex("""^(?<head>\s*[-*]\s*\[)(?<mark>[ xX])(?<tail>]\s*)(?<text>.*)$""")
@@ -111,7 +108,9 @@ sealed interface Edit {
         private fun keyOf(line: String): String? =
             line.substringBefore(':').trim().takeIf { it.isNotEmpty() && ':' in line }
 
-        private fun rank(key: String?): Int = ORDER.indexOf(key).takeIf { it >= 0 } ?: ORDER.size
+        /** Порядок ключей — из [TaskFile.KEYS]: новый ключ встаёт на своё место, а не в хвост. */
+        private fun rank(key: String?): Int =
+            TaskFile.KEYS.indexOf(key).takeIf { it >= 0 } ?: TaskFile.KEYS.size
 
         private fun insertAt(lines: List<String>, end: Int, key: String): Int {
             val mine = rank(key)

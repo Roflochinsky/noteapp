@@ -31,8 +31,11 @@ class RepoWriteWorker(context: Context, params: WorkerParameters) :
             val repo = Settings.githubRepo(applicationContext)
             val token = Settings.githubToken(applicationContext)
             if (token == null) {
+                // Токена нет — это не сеть и не наш баг (решение LLD-6 такого случая не знало):
+                // ретрай крутил бы цепочку вечно. Гасим её; правки лежат в журнале, а воркер
+                // заведёт заново `MainActivity.store()`, как только токен появится в настройках.
                 Log.w(Probe.LOG_TAG, "PROBE:WRITE_SKIP no_token")
-                return@withContext Result.retry()
+                return@withContext Result.failure()
             }
             val store =
                 RepoStore(

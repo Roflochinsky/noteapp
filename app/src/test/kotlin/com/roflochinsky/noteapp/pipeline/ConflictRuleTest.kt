@@ -6,6 +6,9 @@ import org.junit.Test
 /**
  * Трёхстороннее слияние на 409 (решение LLD-2): разные поля — сливаем молча, одно и то же —
  * побеждает git и владельцу показывается расхождение.
+ *
+ * Правило отдаёт вердикт, файл собирает переигрывание правки в `RepoStore` — поэтому здесь
+ * проверяется только вердикт, а сам слитый файл — в `RepoStoreWriteTest`.
  */
 class ConflictRuleTest {
 
@@ -36,9 +39,7 @@ class ConflictRuleTest {
     fun `мы приоритет, они срок — сливается молча`() {
         val mine = Edit.apply(base, Edit.SetField("priority", "P3"))
         val theirs = Edit.apply(base, Edit.SetField("due", "2026-08-30"))
-        val merged = resolve(mine, theirs) as ConflictRule.Merged
-        assertEquals("P3", merged.task.priority)
-        assertEquals("2026-08-30", merged.task.due.toString())
+        assertEquals(ConflictRule.Merged, resolve(mine, theirs))
     }
 
     @Test
@@ -52,12 +53,12 @@ class ConflictRuleTest {
     @Test
     fun `одинаковая правка с обеих сторон конфликтом не считается`() {
         val same = Edit.apply(base, Edit.SetField("status", TaskFile.STATUS_DONE))
-        val merged = resolve(same, same) as ConflictRule.Merged
-        assertEquals(TaskFile.STATUS_DONE, merged.task.status)
+        assertEquals(ConflictRule.Merged, resolve(same, same))
     }
 
+    /** Строки-чекбоксы в описание не входят: перестановка и чужая подзадача — не расхождение. */
     @Test
-    fun `подзадачи сопоставляются по тексту, а не по позиции`() {
+    fun `чужая правка подзадач расхождением не считается`() {
         val mine = Edit.apply(base, Edit.ToggleSubtask("Бэкофф в PushWorker", true))
         val theirs =
             Edit.apply(
@@ -67,12 +68,7 @@ class ConflictRuleTest {
                 ),
                 Edit.AddSubtask("Тест на потерю сети"),
             )
-        val merged = resolve(mine, theirs) as ConflictRule.Merged
-        assertEquals(3, merged.task.subtasks.size)
-        assertEquals(
-            listOf("Бэкофф в PushWorker"),
-            merged.task.subtasks.filter { it.done }.map { it.text },
-        )
+        assertEquals(ConflictRule.Merged, resolve(mine, theirs))
     }
 
     @Test
@@ -84,20 +80,10 @@ class ConflictRuleTest {
     }
 
     @Test
-    fun `чужое удаление подзадачи не воскрешает её нашей галочкой`() {
-        val mine = Edit.apply(base, Edit.ToggleSubtask("Воспроизвести баг", true))
-        val theirs = base.replace("- [ ] Воспроизвести баг\n", "")
-        val merged = resolve(mine, theirs) as ConflictRule.Merged
-        assertEquals(listOf("Бэкофф в PushWorker"), merged.task.subtasks.map { it.text })
-    }
-
-    @Test
-    fun `наша новая подзадача переживает слияние`() {
+    fun `новое поле с одной стороны расхождением не считается`() {
         val mine = Edit.apply(base, Edit.AddSubtask("Тест на потерю сети"))
         val theirs = Edit.apply(base, Edit.SetField("priority", "P2"))
-        val merged = resolve(mine, theirs) as ConflictRule.Merged
-        assertEquals("P2", merged.task.priority)
-        assertEquals("Тест на потерю сети", merged.task.subtasks.last().text)
+        assertEquals(ConflictRule.Merged, resolve(mine, theirs))
     }
 
     private companion object {

@@ -25,8 +25,14 @@ object DocPalette {
     val Nav = Color(0xFF243B63)
     val OnNav = Color(0xFFF4F7FB)
 
+    /** Подложка активного: синий 10% — токен `blue-soft` из DESIGN.md. */
+    val BlueSoft = Color(0x1A3A6FB8)
+
     /** Деструктивное действие — нативный красный Android; коралл остаётся только за записью. */
     val Err = Color(0xFFB3261E)
+
+    /** Обводка деструктивной кнопки: тот же красный 20%. */
+    val ErrLine = Color(0x33B3261E)
 }
 
 private val scheme =

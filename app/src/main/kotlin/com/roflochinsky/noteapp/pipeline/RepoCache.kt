@@ -21,6 +21,32 @@ class RepoCache(val dir: File, private val repo: String, token: String?) {
 
     data class Snapshot(val commitSha: String = "", val files: Map<String, Entry> = emptyMap())
 
+    private var memo: Snapshot? = null
+    private var seen = ""
+
+    /**
+     * Снимок с диска, перечитанный только если файл изменился. Один кэш держат два экземпляра
+     * [RepoStore] — экранный и воркера записи; читать в конструктор один раз нельзя: воркер
+     * отправил правку, убрал её из журнала, а экран остался со старым текстом — галочка отскакивает
+     * (решение LLD-5).
+     *
+     * ponytail: метка — время и размер файла, не счётчик версий внутри json. Потолок: две записи в
+     * одну миллисекунду одинаковой длины экран пропустит до следующего тика; если такое всплывёт —
+     * в json кладётся счётчик и сравнивается он.
+     */
+    fun snapshot(): Snapshot {
+        val now = stamp()
+        val memo = memo
+        if (memo != null && now == seen) return memo
+        return load().also {
+            this.memo = it
+            seen = now
+        }
+    }
+
+    /** Дешёвая метка состояния кэша: не изменилась — пересобирать список не из чего. */
+    fun stamp(): String = file().let { "${it.lastModified()}:${it.length()}" }
+
     fun load(): Snapshot =
         runCatching {
                 val json = JSONObject(file().readText())
@@ -62,6 +88,8 @@ class RepoCache(val dir: File, private val repo: String, token: String?) {
             file().writeText(tmp.readText())
             tmp.delete()
         }
+        memo = snapshot
+        seen = stamp()
     }
 
     private fun file() = File(dir, NAME)

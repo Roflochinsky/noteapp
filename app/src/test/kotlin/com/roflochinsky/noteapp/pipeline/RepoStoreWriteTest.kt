@@ -48,7 +48,7 @@ class RepoStoreWriteTest {
     private fun ready(api: GithubApi?): RepoStore =
         store(tmp.newFolder(), api).also { it.refresh() }
 
-    private fun task(store: RepoStore) = store.tasks().single { it.path == path }
+    private fun task(store: RepoStore) = store.view().tasks.single { it.path == path }
 
     @Test
     fun `галочка видна сразу и без сети, в репо пока ничего`() {
@@ -57,7 +57,7 @@ class RepoStoreWriteTest {
         store.setStatus(path, TaskFile.STATUS_DONE)
         assertTrue("галочка отскочила", task(store).isDone)
         assertEquals(today, task(store).done)
-        assertTrue("путь должен ждать отправки", path in store.pendingPaths())
+        assertTrue("путь должен ждать отправки", path in store.view().pending)
         assertEquals(0, api.writeCalls)
         assertFalse(api.text(path)!!.contains("status: done"))
     }
@@ -73,7 +73,7 @@ class RepoStoreWriteTest {
         assertTrue(api.text(path)!!.contains("status: done"))
         assertEquals(1, api.writeCalls)
         assertEquals("отдельный опрос ref после записи не нужен", refs, api.readRefCalls)
-        assertFalse(path in store.pendingPaths())
+        assertFalse(path in store.view().pending)
         assertTrue(task(store).isDone)
         // Кэш взял свежий sha из ответа: следующая правка уходит без 409.
         store.edit(path, Edit.SetField("priority", "P3"))
@@ -89,8 +89,8 @@ class RepoStoreWriteTest {
         api.put("tasks/новая-чужая.md", "---\ntitle: Чужая\nstatus: open\n---")
         assertEquals(SyncStatus.OK, store.refresh())
         assertEquals("P3", task(store).priority)
-        assertTrue(path in store.pendingPaths())
-        assertEquals(2, store.tasks().size)
+        assertTrue(path in store.view().pending)
+        assertEquals(2, store.view().tasks.size)
     }
 
     @Test
@@ -108,7 +108,7 @@ class RepoStoreWriteTest {
         val text = api.text(path)!!
         assertTrue(text, text.contains("priority: P3"))
         assertTrue(text, text.contains("due: 2026-08-30"))
-        assertNull("расхождения быть не должно", store.takeDivergence())
+        assertNull("расхождения быть не должно", store.view().notice)
     }
 
     @Test
@@ -123,12 +123,12 @@ class RepoStoreWriteTest {
         assertEquals(RepoStore.Push.MORE, store.push())
         assertEquals(RepoStore.Push.EMPTY, store.push())
         assertTrue(api.text(path)!!.contains("status: in_progress"))
-        val message = store.takeDivergence()
+        val message = store.view().notice
         assertNotNull(message)
         assertTrue(message!!, message.contains("Статус"))
         assertTrue(message, message.contains("GitHub"))
         assertEquals(TaskFile.STATUS_IN_PROGRESS, task(store).status)
-        assertNull("сообщение показывается один раз", store.takeDivergence())
+        assertNull("сообщение показывается один раз", store.view().notice)
     }
 
     @Test
@@ -142,7 +142,7 @@ class RepoStoreWriteTest {
         }
         repeat(ConflictRule.MAX_REPLAYS * 2) { store.push() }
         assertEquals(RepoStore.Push.EMPTY, store.push())
-        assertFalse("операция должна была уйти из очереди", path in store.pendingPaths())
+        assertFalse("операция должна была уйти из очереди", path in store.view().pending)
         assertTrue(api.writeCalls <= ConflictRule.MAX_REPLAYS + 1)
     }
 
@@ -151,13 +151,13 @@ class RepoStoreWriteTest {
         val api = api()
         val store = ready(api)
         val created = store.create("Купить переходник USB-C", priority = "P2")
-        assertTrue("создание видно сразу", store.tasks().any { it.path == created })
+        assertTrue("создание видно сразу", store.view().tasks.any { it.path == created })
         assertEquals(RepoStore.Push.MORE, store.push())
         assertTrue(api.paths().contains(created))
         assertTrue(api.text(created)!!.contains("status: open"))
         assertTrue(api.text(created)!!.contains("priority: P2"))
         store.delete(created)
-        assertFalse("удаление видно сразу", store.tasks().any { it.path == created })
+        assertFalse("удаление видно сразу", store.view().tasks.any { it.path == created })
         assertEquals(RepoStore.Push.MORE, store.push())
         assertFalse(api.paths().contains(created))
         assertEquals(RepoStore.Push.EMPTY, store.push())
@@ -173,10 +173,46 @@ class RepoStoreWriteTest {
         assertEquals(RepoStore.Push.RETRY, store.push())
         api.fail = null
         val revived = store(dir, api)
-        assertTrue("операция потерялась при перезапуске", path in revived.pendingPaths())
-        assertTrue(revived.tasks().single { it.path == path }.isDone)
+        assertTrue("операция потерялась при перезапуске", path in revived.view().pending)
+        assertTrue(revived.view().tasks.single { it.path == path }.isDone)
         assertEquals(RepoStore.Push.MORE, revived.push())
         assertTrue(api.text(path)!!.contains("status: done"))
+    }
+
+    @Test
+    fun `галочка не отскакивает, когда коммит отправил другой экземпляр`() {
+        val dir = tmp.newFolder()
+        val api = api()
+        val screen = store(dir, api).also { it.refresh() }
+        screen.setStatus(path, TaskFile.STATUS_DONE)
+        assertTrue("галочка должна встать сразу", task(screen).isDone)
+        // Отправляет воркер — у него свой RepoStore над тем же кэшем (MainActivity держит свой).
+        val worker = store(dir, api)
+        assertEquals(RepoStore.Push.MORE, worker.push())
+        assertEquals(RepoStore.Push.EMPTY, worker.push())
+        assertTrue("коммит должен уйти в репо", api.text(path)!!.contains("status: done"))
+        assertFalse("очередь пуста — янтарь гаснет", path in screen.view().pending)
+        assertTrue(
+            "ГАЛОЧКА ОТСКОЧИЛА: экран показывает open после успешного коммита",
+            task(screen).isDone,
+        )
+    }
+
+    /** Решение LLD-8: на 404 карта перечитывается — призрака в списке остаться не должно. */
+    @Test
+    fun `файл уехал из репо — задача уходит из списка, а не остаётся призраком`() {
+        val api = api()
+        val store = ready(api)
+        store.edit(path, Edit.SetField("priority", "P3"))
+        api.onWrite = { api.remove(path) } // Action перенёс файл, пока правка ждала сети
+        assertEquals(RepoStore.Push.MORE, store.push())
+        assertEquals(RepoStore.Push.EMPTY, store.push())
+        val view = store.view()
+        assertFalse(
+            "задача, которой в репо нет, осталась на экране",
+            view.tasks.any { it.path == path },
+        )
+        assertTrue(view.notice.orEmpty().contains("больше нет"))
     }
 
     @Test
@@ -188,6 +224,29 @@ class RepoStoreWriteTest {
         assertFalse(task(store).isDone)
         assertEquals(RepoStore.Push.EMPTY, store.push())
         assertEquals(0, api.writeCalls)
+    }
+
+    /**
+     * Что раньше проверяли на собранной задаче `ConflictRule.Merged`, теперь проверяется там, где
+     * это действительно происходит: правка переигрывается поверх свежего текста из git.
+     */
+    @Test
+    fun `на 409 чужое удаление подзадачи не воскрешает её нашей галочкой`() {
+        val api = api()
+        val store = ready(api)
+        store.edit(path, Edit.ToggleSubtask("Воспроизвести баг", true))
+        api.onWrite = {
+            // Пока правка ждала сети, ту подзадачу убрали в git и завели свою.
+            api.put(path, fix.replace("- [ ] Воспроизвести баг", "- [ ] Бэкофф в PushWorker"))
+            api.onWrite = null
+        }
+        assertEquals(RepoStore.Push.MORE, store.push()) // 409 → перечитали и слили
+        assertEquals(RepoStore.Push.MORE, store.push()) // повтор на свежем sha
+        assertEquals(RepoStore.Push.EMPTY, store.push())
+        val text = api.text(path)!!
+        assertFalse(text, text.contains("Воспроизвести баг"))
+        assertTrue(text, text.contains("- [ ] Бэкофф в PushWorker"))
+        assertNull("расхождения быть не должно", store.view().notice)
     }
 
     @Test
