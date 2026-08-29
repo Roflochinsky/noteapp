@@ -36,8 +36,7 @@ class RepoWriteWorker(context: Context, params: WorkerParameters) :
             }
             val store =
                 RepoStore(
-                    repo = repo,
-                    cache = RepoCache(RepoStore.cacheDir(applicationContext.filesDir)),
+                    cache = RepoCache(RepoStore.cacheDir(applicationContext.filesDir), repo, token),
                     api = GithubClient(repo, token),
                 )
             var sent = 0
@@ -71,9 +70,7 @@ class RepoWriteWorker(context: Context, params: WorkerParameters) :
             val request =
                 OneTimeWorkRequestBuilder<RepoWriteWorker>()
                     .setConstraints(
-                        Constraints.Builder()
-                            .setRequiredNetworkType(NetworkType.CONNECTED)
-                            .build()
+                        Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
                     )
                     .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_SEC, TimeUnit.SECONDS)
                     .build()

@@ -27,9 +27,19 @@ object TaskFilter {
             .sortedByDescending { it.done } + undated
     }
 
+    /** Счётчик открытых в шапке — один путь для обеих вкладок, без лишней сортировки. */
+    fun openCount(tasks: List<TaskFile.Task>): Int = tasks.count { !it.isDone }
+
     /** В счётчик рубрики идут только закрытые с датой внутри окна. */
     fun doneCount(tasks: List<TaskFile.Task>, today: LocalDate): Int =
         done(tasks, today).count { it.done != null }
+
+    /**
+     * Показывать нечего вовсе. Закрытые в окне «Сделано за месяц» — тоже содержимое: при них «Задач
+     * пока нет» было бы враньём экрана (вердикт UX).
+     */
+    fun nothingToShow(tasks: List<TaskFile.Task>, today: LocalDate): Boolean =
+        openCount(tasks) == 0 && done(tasks, today).isEmpty()
 
     fun isOverdue(task: TaskFile.Task, today: LocalDate): Boolean =
         !task.isDone && task.due != null && task.due.isBefore(today)
@@ -55,11 +65,13 @@ object TaskFilter {
         )
 }
 
+/** Слово рубрики. Чужой приоритет из frontmatter слова не получает — врать «обычный» нельзя. */
 internal fun priorityWord(priority: String): String =
     when (priority) {
         "P1" -> "высокий"
+        "P2" -> "обычный"
         "P3" -> "низкий"
-        else -> "обычный"
+        else -> ""
     }
 
 private val DAYS = listOf("пн", "вт", "ср", "чт", "пт", "сб", "вс")

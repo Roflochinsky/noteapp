@@ -14,15 +14,21 @@ import org.json.JSONObject
  * JVM-юнитах — стаб.
  *
  * @param repo вида "owner/name".
+ * @param fetch транспорт GET одной строкой: в бою — `HttpURLConnection`, в тестах — снятые с репо
+ *   фикстуры. Разбор ответа так проверяется без сети (решение HLD про `HttpTransport`).
  */
-class GithubClient(private val repo: String, private val token: String) : GithubApi {
+class GithubClient(
+    private val repo: String,
+    private val token: String,
+    private val fetch: (String) -> String = { url -> httpGet(url, token) },
+) : GithubApi {
 
     override fun readRef(): String =
-        JSONObject(get("$API/$repo/git/ref/heads/main")).getJSONObject("object").getString("sha")
+        JSONObject(fetch("$API/$repo/git/ref/heads/main")).getJSONObject("object").getString("sha")
 
     override fun readTree(commitSha: String): Map<String, String> {
         val tree =
-            JSONObject(get("$API/$repo/git/trees/$commitSha?recursive=1")).getJSONArray("tree")
+            JSONObject(fetch("$API/$repo/git/trees/$commitSha?recursive=1")).getJSONArray("tree")
         return (0 until tree.length())
             .map { tree.getJSONObject(it) }
             .filter { it.getString("type") == "blob" }
@@ -30,20 +36,15 @@ class GithubClient(private val repo: String, private val token: String) : Github
     }
 
     override fun readBlob(sha: String): String =
-        decode(JSONObject(get("$API/$repo/git/blobs/$sha")).getString("content"))
+        decode(JSONObject(fetch("$API/$repo/git/blobs/$sha")).getString("content"))
 
     override fun readFile(path: String): RepoCache.Entry {
-        val json = JSONObject(get("$API/$repo/contents/${encodePath(path)}"))
+        val json = JSONObject(fetch("$API/$repo/contents/${encodePath(path)}"))
         return RepoCache.Entry(json.getString("sha"), decode(json.getString("content")))
     }
 
     /** Один PUT — один коммит. Без `sha` — только создание нового файла (решение LLD-8). */
-    override fun putFile(
-        path: String,
-        content: String,
-        message: String,
-        sha: String?,
-    ): Written {
+    override fun putFile(path: String, content: String, message: String, sha: String?): Written {
         val body =
             JSONObject()
                 .put("message", message)
@@ -63,9 +64,10 @@ class GithubClient(private val repo: String, private val token: String) : Github
         )
     }
 
+    /** Мутации идут мимо шва [fetch]: он читающий, а тело ответа записи нужно целиком. */
     @Throws(IOException::class)
     private fun send(method: String, path: String, body: JSONObject): String {
-        val conn = open("$API/$repo/contents/${encodePath(path)}")
+        val conn = open("$API/$repo/contents/${encodePath(path)}", token)
         try {
             conn.requestMethod = method
             conn.doOutput = true
@@ -78,50 +80,45 @@ class GithubClient(private val repo: String, private val token: String) : Github
         }
     }
 
-    /** Ищет обработанный файл по префиксу имени (Action добавил слаг) — контракт HLD-1 v1. */
-    @Throws(IOException::class)
-    fun findDonePath(fileBase: String): String? =
-        readTree("main").keys.firstOrNull {
-            !it.startsWith("inbox/") && it.substringAfterLast('/').startsWith(fileBase)
-        }
-
+    /** Ответы GitHub приходят с переносами строк; кодировка задана явно — в репо кириллица. */
     private fun decode(base64: String): String =
-        String(Base64.getMimeDecoder().decode(base64)) // ответы GitHub приходят с переносами строк
-
-    @Throws(IOException::class)
-    private fun get(url: String): String {
-        val conn = open(url)
-        try {
-            check(conn)
-            return conn.inputStream.bufferedReader().readText()
-        } finally {
-            conn.disconnect()
-        }
-    }
-
-    private fun open(url: String): HttpURLConnection {
-        val conn = URL(url).openConnection() as HttpURLConnection
-        conn.connectTimeout = TIMEOUT_MS
-        conn.readTimeout = TIMEOUT_MS
-        conn.setRequestProperty("Authorization", "Bearer $token")
-        conn.setRequestProperty("Accept", "application/vnd.github+json")
-        return conn
-    }
-
-    @Throws(IOException::class)
-    private fun check(conn: HttpURLConnection) {
-        val code = conn.responseCode
-        if (code !in SUCCESS_RANGE) {
-            val err = conn.errorStream?.bufferedReader()?.readText()?.take(ERR_PREVIEW).orEmpty()
-            throw GithubHttpException(code, "GitHub HTTP $code: $err")
-        }
-    }
+        String(Base64.getMimeDecoder().decode(base64), Charsets.UTF_8)
 
     private companion object {
         const val API = "https://api.github.com/repos"
         const val TIMEOUT_MS = 60_000
         const val ERR_PREVIEW = 300
         val SUCCESS_RANGE = 200..299
+
+        @Throws(IOException::class)
+        fun httpGet(url: String, token: String): String {
+            val conn = open(url, token)
+            try {
+                check(conn)
+                return conn.inputStream.bufferedReader().readText()
+            } finally {
+                conn.disconnect()
+            }
+        }
+
+        fun open(url: String, token: String): HttpURLConnection {
+            val conn = URL(url).openConnection() as HttpURLConnection
+            conn.connectTimeout = TIMEOUT_MS
+            conn.readTimeout = TIMEOUT_MS
+            conn.setRequestProperty("Authorization", "Bearer $token")
+            conn.setRequestProperty("Accept", "application/vnd.github+json")
+            return conn
+        }
+
+        @Throws(IOException::class)
+        fun check(conn: HttpURLConnection) {
+            val code = conn.responseCode
+            if (code !in SUCCESS_RANGE) {
+                val err =
+                    conn.errorStream?.bufferedReader()?.readText()?.take(ERR_PREVIEW).orEmpty()
+                throw GithubHttpException(code, "GitHub HTTP $code: $err")
+            }
+        }
 
         /** Пробел в пути — `%20`, не `+`; кириллица — UTF-8-проценты. */
         fun encodePath(path: String): String =

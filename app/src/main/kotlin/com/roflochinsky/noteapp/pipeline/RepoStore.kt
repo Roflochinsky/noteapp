@@ -25,7 +25,6 @@ enum class SyncStatus {
  * `compare` и дельта живут в срезе Н7, раньше они экономят то, чего никто не тратит.
  */
 class RepoStore(
-    private val repo: String,
     private val cache: RepoCache,
     private val api: GithubApi?,
     private val queue: WriteQueue = WriteQueue(File(cache.dir, QUEUE)),
@@ -40,13 +39,13 @@ class RepoStore(
         FAILED,
     }
 
-    private var snapshot = cache.load(repo)
+    private var snapshot = cache.load()
 
     /** Задачи из кэша поверх ожидающих правок — рисуются мгновенно, без сети (решение LLD-12). */
     fun tasks(): List<TaskFile.Task> = overlay().map { (path, text) -> TaskFile.parse(path, text) }
 
-    /** Путь ждёт отправки: в мета-строке и статус-строке это янтарное «в очереди». */
-    fun isPending(path: String): Boolean = queue.pending(path).isNotEmpty()
+    /** Пути, ждущие отправки: в мета-строке и в деталке это янтарное «в очереди». */
+    fun pendingPaths(): Set<String> = queue.pending().map { it.path }.toSet()
 
     fun edit(path: String, edit: Edit): String = queue.enqueue(path, edit, sha(path)).id
 
@@ -107,11 +106,14 @@ class RepoStore(
                             ?: RepoCache.Entry(sha, api.readBlob(sha))
                     }
             snapshot = RepoCache.Snapshot(commit, files)
-            cache.save(repo, snapshot)
+            cache.save(snapshot)
             SyncStatus.OK
         } catch (e: GithubHttpException) {
             status(e)
-        } catch (@Suppress("SwallowedException") e: IOException) {
+        } catch (@Suppress("SwallowedException", "TooGenericExceptionCaught") e: Exception) {
+            // Ловим шире IOException намеренно: ответ разбирается через org.json, а JSONException
+            // ему не родня. Ответ 200 с не-JSON телом (кэптив-портал, HTML от CDN) ронял корутину
+            // экрана целиком — для владельца это неотличимо от «нет сети», ей и показываем.
             SyncStatus.OFFLINE
         }
     }
@@ -150,9 +152,8 @@ class RepoStore(
     private fun gone(api: GithubApi, op: WriteQueue.Op): Push {
         val sha = snapshot.files[op.path]?.sha ?: api.readFile(op.path).sha
         val written = api.deleteFile(op.path, message(op), sha)
-        snapshot =
-            snapshot.copy(commitSha = written.commitSha, files = snapshot.files - op.path)
-        cache.save(repo, snapshot)
+        snapshot = snapshot.copy(commitSha = written.commitSha, files = snapshot.files - op.path)
+        cache.save(snapshot)
         return drop(op)
     }
 
@@ -218,20 +219,23 @@ class RepoStore(
     private fun accept(path: String, entry: RepoCache.Entry, commitSha: String) {
         // Кэш обновляется из ответа записи: отдельный опрос ref не нужен (решение LLD-4).
         snapshot = snapshot.copy(commitSha = commitSha, files = snapshot.files + (path to entry))
-        cache.save(repo, snapshot)
+        cache.save(snapshot)
     }
 
     /** Кэш + журнал: то, что владелец видит на экране прямо сейчас. */
     private fun overlay(): Map<String, String> {
         val texts = LinkedHashMap<String, String>()
         snapshot.files.filterKeys { isTask(it) }.forEach { (path, e) -> texts[path] = e.text }
-        queue.pending().filter { isTask(it.path) }.forEach { op ->
-            when (val edit = op.edit) {
-                Edit.DeleteFile -> texts.remove(op.path)
-                is Edit.CreateTask -> texts[op.path] = edit.content
-                else -> texts[op.path]?.let { texts[op.path] = Edit.apply(it, edit) }
+        queue
+            .pending()
+            .filter { isTask(it.path) }
+            .forEach { op ->
+                when (val edit = op.edit) {
+                    Edit.DeleteFile -> texts.remove(op.path)
+                    is Edit.CreateTask -> texts[op.path] = edit.content
+                    else -> texts[op.path]?.let { texts[op.path] = Edit.apply(it, edit) }
+                }
             }
-        }
         return texts
     }
 

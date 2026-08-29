@@ -1,20 +1,25 @@
 package com.roflochinsky.noteapp.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -34,12 +39,15 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -80,36 +88,36 @@ fun TasksScreen(
     val pull = rememberPullToRefreshState()
     var undo by remember { mutableStateOf<String?>(null) }
     Box(Modifier.fillMaxSize()) {
-    Column(Modifier.fillMaxSize()) {
-        SectionTabs(Tab.TASKS, TaskFilter.open(tasks, today).size, onTab, onSettings)
-        SyncLine(sync, onSettings)
-        PullToRefreshBox(
-            isRefreshing = refreshing,
-            onRefresh = onRefresh,
-            modifier = Modifier.weight(1f),
-            state = pull,
-            indicator = {
-                PullToRefreshDefaults.Indicator(
-                    state = pull,
-                    isRefreshing = refreshing,
-                    modifier = Modifier.align(Alignment.TopCenter),
-                    containerColor = DocPalette.Paper,
-                    color = DocPalette.Blue,
-                )
-            },
-        ) {
-            TaskList(tasks, today, pending, onTask) { task ->
-                val id = onToggle(task)
-                undo = if (task.isDone) null else id
-                if (task.isDone) onFlush()
+        Column(Modifier.fillMaxSize()) {
+            SectionTabs(Tab.TASKS, TaskFilter.openCount(tasks), onTab, onSettings)
+            SyncLine(sync, onSettings)
+            PullToRefreshBox(
+                isRefreshing = refreshing,
+                onRefresh = onRefresh,
+                modifier = Modifier.weight(1f),
+                state = pull,
+                indicator = {
+                    PullToRefreshDefaults.Indicator(
+                        state = pull,
+                        isRefreshing = refreshing,
+                        modifier = Modifier.align(Alignment.TopCenter),
+                        containerColor = DocPalette.Paper,
+                        color = DocPalette.Blue,
+                    )
+                },
+            ) {
+                TaskList(tasks, today, pending, onTask) { task ->
+                    val id = onToggle(task)
+                    undo = if (task.isDone) null else id
+                    if (task.isDone) onFlush()
+                }
+            }
+            if (isRecording) {
+                RecordBar(isRecording = true, onRecord = onRecord)
+            } else {
+                NewTaskBar(onNewTask)
             }
         }
-        if (isRecording) {
-            RecordBar(isRecording = true, onRecord = onRecord)
-        } else {
-            NewTaskBar(onNewTask)
-        }
-    }
         undo?.let { id ->
             // Окно отмены: операция уже в журнале, но воркер стартует, когда снекбар закроется.
             LaunchedEffect(id) {
@@ -177,19 +185,22 @@ private fun TaskList(
     val done = TaskFilter.done(tasks, today)
     var doneOpen by rememberSaveable { mutableStateOf(false) }
     LazyColumn(Modifier.fillMaxSize()) {
-        if (tasks.isEmpty()) {
+        // Пусто ровно тогда, когда показывать нечего вовсе: при свёрнутой рубрике «Сделано»
+        // «Задач пока нет» было бы враньём экрана. Фильтров в Н1 нет (они в Н3), поэтому
+        // «под этот фильтр ничего не подошло» сказать нечем.
+        if (TaskFilter.nothingToShow(tasks, today)) {
             item { EmptyTasks() }
-        } else if (groups.isEmpty()) {
-            item { EmptyUnderState() }
         }
         groups.forEach { (priority, group) ->
             item(key = "prio-$priority") { PriorityRubric(priority) }
-            items(group, key = { it.path }) { task ->
+            itemsIndexed(group, key = { _, task -> task.path }) { i, task ->
+                // Комп: `.trow + .trow{border-top}` — линия между соседями, после последней нет.
+                // Линия full-bleed: в компе border-top висит на самой строке с её паддингом,
+                // и `DESIGN.md` требует «full-bleed строки, разделённые hairline 1px».
+                if (i > 0) {
+                    HorizontalDivider(color = DocPalette.Line)
+                }
                 TaskRow(task, today, pending(task.path), onTask, onToggle)
-                HorizontalDivider(
-                    color = DocPalette.Line,
-                    modifier = Modifier.padding(horizontal = 22.dp),
-                )
             }
         }
         if (done.isNotEmpty()) {
@@ -197,12 +208,11 @@ private fun TaskList(
                 DoneFold(TaskFilter.doneCount(tasks, today), doneOpen) { doneOpen = !doneOpen }
             }
             if (doneOpen) {
-                items(done, key = { "done-${it.path}" }) { task ->
+                itemsIndexed(done, key = { _, task -> "done-${task.path}" }) { i, task ->
+                    if (i > 0) {
+                        HorizontalDivider(color = DocPalette.Line)
+                    }
                     TaskRow(task, today, pending(task.path), onTask, onToggle)
-                    HorizontalDivider(
-                        color = DocPalette.Line,
-                        modifier = Modifier.padding(horizontal = 22.dp),
-                    )
                 }
             }
         }
@@ -217,7 +227,8 @@ private fun PriorityRubric(priority: String) {
         verticalAlignment = Alignment.Bottom,
     ) {
         Text(priority, style = MaterialTheme.typography.labelMedium.copy(color = DocPalette.Ink))
-        Text(priorityWord(priority).uppercase(), style = MaterialTheme.typography.labelSmall)
+        val word = priorityWord(priority)
+        if (word.isNotEmpty()) Text(word.uppercase(), style = MaterialTheme.typography.labelSmall)
     }
 }
 
@@ -288,62 +299,106 @@ private fun TaskCheckbox(done: Boolean, onToggle: () -> Unit) {
     }
 }
 
+/**
+ * Мета-строка борда 1: проект → просрочка/срок → подзадачи → «в работе» → теги, между элементами
+ * точка-разделитель. Порядок и стиль элемента хранятся вместе — один список, а не «моно» и «текст»
+ * двумя кучами, иначе порядок компа собрать нельзя.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TaskMeta(task: TaskFile.Task, today: LocalDate, pending: Boolean) {
     val overdue = TaskFilter.isOverdue(task, today)
-    val plain = buildList {
-        task.project?.let { add(it) }
-        if (task.status == TaskFile.STATUS_IN_PROGRESS) add("в работе")
-        task.tags.forEach { add("#$it") }
-    }
-    val mono = buildList {
-        if (!overdue && !task.isDone) task.due?.let { add(dueLabel(it, today)) }
-        if (task.subtasks.isNotEmpty()) {
-            add("${task.subtasks.count { it.done }}/${task.subtasks.size}")
+    val text = MaterialTheme.typography.bodySmall
+    val mono = MaterialTheme.typography.labelMedium
+    val parts =
+        buildList<@Composable () -> Unit> {
+            // Состояние записи важнее полей: «в очереди» стоит первым и всегда янтарём (вердикт
+            // UX).
+            if (pending) {
+                add { Text("в очереди", style = text.copy(color = DocPalette.Amber)) }
+            }
+            task.project?.let { project -> add { Text(project, style = text) } }
+            if (overdue) {
+                add { OverdueLabel(task.due!!, today) }
+            } else if (!task.isDone) {
+                task.due?.let { due -> add { Text(dueLabel(due, today), style = mono) } }
+            }
+            if (task.subtasks.isNotEmpty()) {
+                val progress = "${task.subtasks.count { it.done }}/${task.subtasks.size}"
+                add { Text(progress, style = mono) }
+            }
+            if (task.status == TaskFile.STATUS_IN_PROGRESS) add { Text("в работе", style = text) }
+            task.tags.forEach { tag -> add { Text("#$tag", style = text) } }
         }
-    }
-    if (plain.isEmpty() && mono.isEmpty() && !overdue && !pending) return
-    Row(
+    if (parts.isEmpty()) return
+    // Мета длиннее строки переносится (комп: flex-wrap), а не режется и не ломает раскладку.
+    FlowRow(
         modifier = Modifier.padding(top = 5.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        parts.forEachIndexed { i, part ->
+            if (i > 0) Text("·", style = mono)
+            part()
+        }
+    }
+}
+
+/**
+ * Просрочка по компу: часы 13dp и полужирный янтарь — она должна кричать громче остальной меты.
+ *
+ * ponytail: часы рисуются вручную по пути из компа — ради одной иконки тащить
+ * `material-icons-extended` (тысячи векторов в APK) не стоит.
+ */
+@Composable
+private fun OverdueLabel(due: LocalDate, today: LocalDate) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (overdue) {
-            Text(
-                overdueLabel(task.due!!, today),
-                style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.Amber),
-            )
+        Canvas(Modifier.size(CLOCK.dp)) {
+            val u = size.minDimension / VIEWBOX // комп рисует в вьюбоксе 24
+            val stroke = 2f * u
+            val centre = Offset(12f * u, 12f * u)
+            drawCircle(DocPalette.Amber, radius = 8.5f * u, center = centre, style = Stroke(stroke))
+            drawLine(DocPalette.Amber, Offset(12f * u, 7.5f * u), centre, stroke, StrokeCap.Round)
+            drawLine(DocPalette.Amber, centre, Offset(15f * u, 14f * u), stroke, StrokeCap.Round)
         }
-        if (pending) {
-            Text(
-                "в очереди",
-                style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.Amber),
-            )
-        }
-        mono.forEach { Text(it, style = MaterialTheme.typography.labelMedium) }
-        plain.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+        Text(
+            overdueLabel(due, today),
+            style =
+                MaterialTheme.typography.bodySmall.copy(
+                    color = DocPalette.Amber,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+        )
     }
 }
 
 @Composable
 private fun DoneFold(count: Int, open: Boolean, onToggle: () -> Unit) {
-    Row(
-        modifier =
-            Modifier.fillMaxWidth()
-                .clickable(onClick = onToggle)
-                .padding(horizontal = 22.dp)
-                .height(TOUCH.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Icon(
-            if (open) Icons.Filled.KeyboardArrowDown
-            else Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            tint = DocPalette.Mut,
-            modifier = Modifier.size(18.dp),
-        )
-        Text("Сделано за месяц · $count", style = MaterialTheme.typography.bodySmall)
+    Column {
+        // Комп: `.fold{border-top}` — над рубрикой «Сделано» линия есть всегда, в отличие от
+        // строк задач (там линия только между соседями).
+        HorizontalDivider(color = DocPalette.Line)
+        Row(
+            modifier =
+                Modifier.fillMaxWidth()
+                    .clickable(onClick = onToggle)
+                    .padding(horizontal = 22.dp)
+                    .height(TOUCH.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(
+                if (open) Icons.Filled.KeyboardArrowDown
+                else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = DocPalette.Mut,
+                modifier = Modifier.size(18.dp),
+            )
+            Text("Сделано за месяц · $count", style = MaterialTheme.typography.bodySmall)
+        }
     }
 }
 
@@ -365,15 +420,6 @@ private fun EmptyTasks() {
 }
 
 @Composable
-private fun EmptyUnderState() {
-    Text(
-        "Под этот фильтр ничего не подошло",
-        style = MaterialTheme.typography.bodySmall,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 24.dp),
-    )
-}
-
-@Composable
 private fun NewTaskBar(onNewTask: () -> Unit) {
     Column(
         modifier =
@@ -391,12 +437,14 @@ private fun NewTaskBar(onNewTask: () -> Unit) {
                 ),
         ) {
             Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-            Box(Modifier.size(width = 10.dp, height = 1.dp))
+            Spacer(Modifier.width(10.dp))
             Text("Новая задача")
         }
     }
 }
 
 private const val TOUCH = 48
+private const val CLOCK = 13
+private const val VIEWBOX = 24f
 private const val UNDO_MS = 5000L
 private const val NOTICE_MS = 6000L

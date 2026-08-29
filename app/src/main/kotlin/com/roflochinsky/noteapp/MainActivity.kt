@@ -11,7 +11,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,6 +27,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.lifecycleScope
 import com.roflochinsky.noteapp.pipeline.GithubClient
 import com.roflochinsky.noteapp.pipeline.NotesStore
 import com.roflochinsky.noteapp.pipeline.RepoCache
@@ -39,12 +39,13 @@ import com.roflochinsky.noteapp.pipeline.TaskFile
 import com.roflochinsky.noteapp.ui.DetailScreen
 import com.roflochinsky.noteapp.ui.DocTheme
 import com.roflochinsky.noteapp.ui.FeedScreen
+import com.roflochinsky.noteapp.ui.NewTaskSheet
 import com.roflochinsky.noteapp.ui.OnboardStep
 import com.roflochinsky.noteapp.ui.OnboardingScreen
-import com.roflochinsky.noteapp.ui.NewTaskSheet
 import com.roflochinsky.noteapp.ui.RecordSheet
-import com.roflochinsky.noteapp.ui.TaskDetailScreen
 import com.roflochinsky.noteapp.ui.Tab
+import com.roflochinsky.noteapp.ui.TaskDetailScreen
+import com.roflochinsky.noteapp.ui.TaskFilter
 import com.roflochinsky.noteapp.ui.TasksScreen
 import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
@@ -71,7 +72,6 @@ class MainActivity : ComponentActivity() {
     private var pendingPaths by mutableStateOf(emptySet<String>())
     private var notice by mutableStateOf<String?>(null)
     private var newTaskOpen by mutableStateOf(false)
-    private var store: RepoStore? = null
     private var watching = false
     private var sync by mutableStateOf(SyncStatus.OK)
     private var refreshing by mutableStateOf(false)
@@ -80,6 +80,8 @@ class MainActivity : ComponentActivity() {
     private var dialog by mutableStateOf<String?>(null) // "deepgram" | "github"
     private var input by mutableStateOf("")
     private var permTick by mutableIntStateOf(0)
+    private var repoStore: RepoStore? = null
+    private var repoKey: String? = null
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -129,7 +131,8 @@ class MainActivity : ComponentActivity() {
                         FeedScreen(
                             notes = notes,
                             isRecording = recording,
-                            tasksCount = tasks.count { !it.isDone },
+                            tasksCount = TaskFilter.openCount(tasks),
+                            sync = sync,
                             onTab = { screen = Screen.Feed(it) },
                             onNote = { screen = Screen.Detail(it) },
                             onRecord = ::onRecord,
@@ -222,15 +225,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun projects(): List<String> =
-        tasks.mapNotNull { it.project }.distinct().sorted()
+    private fun projects(): List<String> = tasks.mapNotNull { it.project }.distinct().sorted()
 
     /**
      * Правка кладётся в журнал очереди прямо здесь: это один маленький файл, зато `id` операции
      * нужен снекбару отмены сразу. Тяжёлое (пересбор списка из кэша) уходит на IO.
      */
     private fun toggle(scope: kotlinx.coroutines.CoroutineScope, task: TaskFile.Task): String {
-        val store = store ?: return ""
+        val store = repoStore ?: return ""
         val status = if (task.isDone) TaskFile.STATUS_OPEN else TaskFile.STATUS_DONE
         val id = store.setStatus(task.path, status)
         scope.launch { reload() }
@@ -243,7 +245,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun after(scope: kotlinx.coroutines.CoroutineScope, action: (RepoStore) -> Unit) {
-        val store = store ?: return
+        val store = repoStore ?: return
         scope.launch {
             withContext(Dispatchers.IO) { action(store) }
             reload()
@@ -252,7 +254,7 @@ class MainActivity : ComponentActivity() {
 
     /** Список и «в очереди» пересчитываются из кэша и журнала — вне главного потока. */
     private suspend fun reload() {
-        val store = store ?: return
+        val store = repoStore ?: return
         val fresh =
             withContext(Dispatchers.IO) {
                 Triple(store.tasks(), store.pendingPaths(), store.takeDivergence())
@@ -270,7 +272,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             while (pendingPaths.isNotEmpty()) {
                 delay(POLL_MS)
-                val store = store ?: break
+                val store = repoStore ?: break
                 val fresh =
                     withContext(Dispatchers.IO) {
                         Triple(store.tasks(), store.pendingPaths(), store.takeDivergence())
@@ -295,26 +297,54 @@ class MainActivity : ComponentActivity() {
         else startForegroundService(RecordingService.toggleIntent(this))
     }
 
-    /** Кэш рисуется мгновенно, сеть догоняет фоном (решение LLD-12). */
+    /**
+     * Кэш рисуется мгновенно, сеть догоняет фоном (решение LLD-12). Индикатор поднимается первой
+     * строкой — до любого прыжка в IO, иначе он включался уже после того, как всё прочитано; гаснет
+     * в `finally`, чтобы сорвавшийся `refresh()` не оставил вертушку крутиться навсегда.
+     *
+     * `tasks()` парсит каждый файл кэша, поэтому обе выборки живут в IO: главный поток только
+     * рисует.
+     */
     private suspend fun refreshRepo() {
-        val repo = Settings.githubRepo(this)
-        val token = Settings.githubToken(this)
+        refreshing = true
+        try {
+            store()
+            reload()
+            sync = withContext(Dispatchers.IO) { repoStore?.refresh() } ?: SyncStatus.NO_TOKEN
+            reload()
+        } finally {
+            refreshing = false
+        }
+    }
+
+    /**
+     * Один фасад на сессию: он держит снимок кэша, а пересоздание на каждое обновление этот снимок
+     * выбрасывало. Ключ — репо и токен: подключили GitHub в настройках — фасад пересоберётся сам.
+     *
+     * Долг Н-8 ревью Н1: `Settings` — это SharedPreferences, то есть диск; читаются они внутри
+     * `withContext(Dispatchers.IO)`, главный поток только рисует.
+     */
+    private suspend fun store(): RepoStore {
         val fresh =
             withContext(Dispatchers.IO) {
-                RepoStore(
-                    repo = repo,
-                    cache = RepoCache(RepoStore.cacheDir(filesDir)),
-                    api = token?.let { GithubClient(repo, it) },
-                )
+                val repo = Settings.githubRepo(this@MainActivity)
+                val token = Settings.githubToken(this@MainActivity)
+                val key = "$repo:${token?.hashCode() ?: 0}"
+                repoStore?.takeIf { repoKey == key }
+                    ?: RepoStore(
+                            cache = RepoCache(RepoStore.cacheDir(filesDir), repo, token),
+                            api = token?.let { GithubClient(repo, it) },
+                        )
+                        .also { repoKey = key }
             }
-        store = fresh
-        reload()
-        refreshing = true
-        sync = withContext(Dispatchers.IO) { fresh.refresh() }
-        reload()
-        refreshing = false
-        // Правки, пережившие перезапуск, доводит тот же воркер — их никто не потерял.
-        if (pendingPaths.isNotEmpty()) RepoWriteWorker.schedule(this)
+        if (fresh !== repoStore) {
+            repoStore = fresh
+            // Правки, пережившие перезапуск, доводит тот же воркер — их никто не потерял.
+            if (withContext(Dispatchers.IO) { fresh.pendingPaths().isNotEmpty() }) {
+                RepoWriteWorker.schedule(this)
+            }
+        }
+        return fresh
     }
 
     private fun sendAction(action: String) {

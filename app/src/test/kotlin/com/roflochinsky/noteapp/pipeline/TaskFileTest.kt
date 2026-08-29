@@ -92,6 +92,15 @@ class TaskFileTest {
         assertTrue(out, out.contains("напоминание: не забыть про Диму"))
     }
 
+    /** Решение LLD-9: ключ есть в файле — он останется, даже когда значение пустое. */
+    @Test
+    fun `неизвестный ключ без значения не теряется`() {
+        val src = messy.replace("напоминание:", "черновик:\nнапоминание:")
+        val out = TaskFile.build(TaskFile.parse("tasks/x.md", src))
+        assertEquals("", TaskFile.parse("tasks/x.md", out).extra["черновик"])
+        assertEquals(out, TaskFile.build(TaskFile.parse("tasks/x.md", out)))
+    }
+
     @Test
     fun `заголовок с двоеточием при сборке закавычивается`() {
         val out = TaskFile.build(TaskFile.parse("tasks/x.md", messy))

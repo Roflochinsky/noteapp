@@ -28,6 +28,18 @@ interface GithubApi {
     @Throws(IOException::class) fun deleteFile(path: String, message: String, sha: String): Written
 }
 
+/**
+ * Ищет обработанный файл по префиксу имени (Action добавил слаг) — контракт HLD-1 v1.
+ *
+ * Живёт над портом, а не в адаптере: дерево читается по SHA коммита, как объявлено в [readTree]
+ * (раньше сюда подставлялось имя ветки — работало случайно и фейком не проверялось).
+ */
+@Throws(IOException::class)
+fun GithubApi.findDonePath(fileBase: String): String? =
+    readTree(readRef()).keys.firstOrNull {
+        !it.startsWith("inbox/") && it.substringAfterLast('/').startsWith(fileBase)
+    }
+
 /** Ответ записи: свежий blob-SHA файла (у удаления его нет) и SHA коммита (research §7.1). */
 data class Written(val sha: String?, val commitSha: String)
 

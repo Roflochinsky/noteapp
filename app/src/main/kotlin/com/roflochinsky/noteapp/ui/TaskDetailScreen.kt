@@ -335,9 +335,7 @@ private fun Fields(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 task.tags.forEach { tag ->
-                    RemovableTag(tag) {
-                        onEdit(Edit.SetField("tags", tagsValue(task.tags - tag)))
-                    }
+                    RemovableTag(tag) { onEdit(Edit.SetField("tags", tagsValue(task.tags - tag))) }
                 }
                 Text(
                     "+ тег",

@@ -94,8 +94,7 @@ private fun ChoiceRows(
     choices.forEachIndexed { i, choice ->
         if (i > 0) HorizontalDivider(color = DocPalette.Line)
         Row(
-            modifier =
-                Modifier.fillMaxWidth().clickable { onPick(choice.value) }.height(TOUCH.dp),
+            modifier = Modifier.fillMaxWidth().clickable { onPick(choice.value) }.height(TOUCH.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -215,7 +214,9 @@ fun InputSheet(
 @Composable
 fun DueDialog(initial: LocalDate?, onDismiss: () -> Unit, onPick: (LocalDate?) -> Unit) {
     val state =
-        rememberDatePickerState(initialSelectedDateMillis = initial?.let { it.toEpochDay() * DAY_MS })
+        rememberDatePickerState(
+            initialSelectedDateMillis = initial?.let { it.toEpochDay() * DAY_MS }
+        )
     DatePickerDialog(
         onDismissRequest = onDismiss,
         colors = DatePickerDefaults.colors(containerColor = DocPalette.Paper),
@@ -242,12 +243,7 @@ fun DueDialog(initial: LocalDate?, onDismiss: () -> Unit, onPick: (LocalDate?) -
 
 /** Диалог удаления: цель одна, поэтому чекбоксов нет — заголовок, путь файла, два действия. */
 @Composable
-fun DeleteTaskDialog(
-    title: String,
-    path: String,
-    onDismiss: () -> Unit,
-    onDelete: () -> Unit,
-) {
+fun DeleteTaskDialog(title: String, path: String, onDismiss: () -> Unit, onDelete: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = DocPalette.Paper,
@@ -288,8 +284,8 @@ private enum class Picking {
 }
 
 /**
- * Шторка «Новая задача» (борд 4): ввод, чипы значений, кнопка и путь будущего файла. Выбор
- * значения раскрывается в этой же шторке — вложенных шторок в Compose не бывает.
+ * Шторка «Новая задача» (борд 4): ввод, чипы значений, кнопка и путь будущего файла. Выбор значения
+ * раскрывается в этой же шторке — вложенных шторок в Compose не бывает.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -316,8 +312,7 @@ fun NewTaskSheet(
                 }
             Picking.PRIORITY ->
                 ChoiceRows(
-                    choices =
-                        TaskFilter.PRIORITIES.map { Choice(it, "$it · ${priorityWord(it)}") },
+                    choices = TaskFilter.PRIORITIES.map { Choice(it, "$it · ${priorityWord(it)}") },
                     selected = draft.priority,
                     counts = emptyMap(),
                 ) {
@@ -398,10 +393,7 @@ private fun Chip(label: String, on: Boolean, chevron: Boolean = false, onClick: 
                     if (on) DocPalette.Blue else DocPalette.Line,
                     RoundedCornerShape(9.dp),
                 )
-                .background(
-                    if (on) BLUE_SOFT else DocPalette.Paper,
-                    RoundedCornerShape(9.dp),
-                )
+                .background(if (on) BLUE_SOFT else DocPalette.Paper, RoundedCornerShape(9.dp))
                 .clickable(onClick = onClick)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,

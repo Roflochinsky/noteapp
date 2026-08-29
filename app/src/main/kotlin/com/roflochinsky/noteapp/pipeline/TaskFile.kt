@@ -83,7 +83,12 @@ object TaskFile {
         return Frontmatter.render(f) + if (body.isEmpty()) "" else "\n$body\n"
     }
 
-    /** Имя файла задачи: дата создания + транслит-слаг, при коллизии — суффикс (решение LLD-15). */
+    /**
+     * Имя файла задачи: дата создания + транслит-слаг, при коллизии — суффикс (решение LLD-15).
+     *
+     * В Н1 вызывающего кода нет — первым станет создание задачи в Н2, оно уже строится на этой
+     * подписи. Поэтому правило живёт здесь, рядом с разбором и сборкой того же файла.
+     */
     fun fileName(date: LocalDate, title: String, taken: Set<String>): String {
         val slug = slug(title).ifEmpty { "zadacha" }
         val names = taken.map { it.substringAfterLast('/') }.toSet()

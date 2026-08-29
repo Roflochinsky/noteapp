@@ -43,7 +43,7 @@ class RepoStoreWriteTest {
     private fun api() = FakeGithubApi().apply { put(path, fix) }
 
     private fun store(dir: java.io.File, api: GithubApi?) =
-        RepoStore(repo, RepoCache(dir), api, today = today)
+        RepoStore(RepoCache(dir, repo, "token"), api, today = today)
 
     private fun ready(api: GithubApi?): RepoStore =
         store(tmp.newFolder(), api).also { it.refresh() }
@@ -57,7 +57,7 @@ class RepoStoreWriteTest {
         store.setStatus(path, TaskFile.STATUS_DONE)
         assertTrue("галочка отскочила", task(store).isDone)
         assertEquals(today, task(store).done)
-        assertTrue("путь должен ждать отправки", store.isPending(path))
+        assertTrue("путь должен ждать отправки", path in store.pendingPaths())
         assertEquals(0, api.writeCalls)
         assertFalse(api.text(path)!!.contains("status: done"))
     }
@@ -73,7 +73,7 @@ class RepoStoreWriteTest {
         assertTrue(api.text(path)!!.contains("status: done"))
         assertEquals(1, api.writeCalls)
         assertEquals("отдельный опрос ref после записи не нужен", refs, api.readRefCalls)
-        assertFalse(store.isPending(path))
+        assertFalse(path in store.pendingPaths())
         assertTrue(task(store).isDone)
         // Кэш взял свежий sha из ответа: следующая правка уходит без 409.
         store.edit(path, Edit.SetField("priority", "P3"))
@@ -89,7 +89,7 @@ class RepoStoreWriteTest {
         api.put("tasks/новая-чужая.md", "---\ntitle: Чужая\nstatus: open\n---")
         assertEquals(SyncStatus.OK, store.refresh())
         assertEquals("P3", task(store).priority)
-        assertTrue(store.isPending(path))
+        assertTrue(path in store.pendingPaths())
         assertEquals(2, store.tasks().size)
     }
 
@@ -137,10 +137,12 @@ class RepoStoreWriteTest {
         val store = ready(api)
         store.edit(path, Edit.SetField("priority", "P3"))
         var n = 0
-        api.onWrite = { api.put(path, Edit.apply(api.text(path)!!, Edit.AddSubtask("чужая ${n++}"))) }
+        api.onWrite = {
+            api.put(path, Edit.apply(api.text(path)!!, Edit.AddSubtask("чужая ${n++}")))
+        }
         repeat(ConflictRule.MAX_REPLAYS * 2) { store.push() }
         assertEquals(RepoStore.Push.EMPTY, store.push())
-        assertFalse("операция должна была уйти из очереди", store.isPending(path))
+        assertFalse("операция должна была уйти из очереди", path in store.pendingPaths())
         assertTrue(api.writeCalls <= ConflictRule.MAX_REPLAYS + 1)
     }
 
@@ -171,7 +173,7 @@ class RepoStoreWriteTest {
         assertEquals(RepoStore.Push.RETRY, store.push())
         api.fail = null
         val revived = store(dir, api)
-        assertTrue("операция потерялась при перезапуске", revived.isPending(path))
+        assertTrue("операция потерялась при перезапуске", path in revived.pendingPaths())
         assertTrue(revived.tasks().single { it.path == path }.isDone)
         assertEquals(RepoStore.Push.MORE, revived.push())
         assertTrue(api.text(path)!!.contains("status: done"))

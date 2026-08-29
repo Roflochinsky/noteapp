@@ -3,8 +3,8 @@ package com.roflochinsky.noteapp.pipeline
 import java.time.LocalDate
 
 /**
- * Трёхстороннее слияние задачи на 409 (решения LLD-2 и LLD-3). Вход — разобранные структуры:
- * `base` — то, на чём владелец правил, `mine` — его результат, `theirs` — то, что сейчас в git.
+ * Трёхстороннее слияние задачи на 409 (решения LLD-2 и LLD-3). Вход — разобранные структуры: `base`
+ * — то, на чём владелец правил, `mine` — его результат, `theirs` — то, что сейчас в git.
  *
  * Разные поля — сливаем молча; одно и то же поле с двух сторон — побеждает git, владельцу
  * показывается расхождение (ADR app-writes-to-repo: с той стороны обычно Action с саммари).
@@ -23,11 +23,7 @@ object ConflictRule {
 
     data class Divergence(val fields: List<String>) : Result
 
-    fun resolve(
-        base: TaskFile.Task,
-        mine: TaskFile.Task,
-        theirs: TaskFile.Task,
-    ): Result {
+    fun resolve(base: TaskFile.Task, mine: TaskFile.Task, theirs: TaskFile.Task): Result {
         val b = view(base)
         val m = view(mine)
         val t = view(theirs)
@@ -64,20 +60,19 @@ object ConflictRule {
         }
 
     /** Задача как плоская карта «ключ → значение»: frontmatter по ключам плюс описание. */
-    private fun view(t: TaskFile.Task): Map<String, String?> =
-        buildMap {
-            put("title", t.title)
-            put("project", t.project)
-            put("priority", t.priority)
-            put("status", t.status)
-            put("source", t.source)
-            put("created", t.created?.toString())
-            put("due", t.due?.toString())
-            put("done", t.done?.toString())
-            put("tags", t.tags.joinToString(", ").ifEmpty { null })
-            put(DESCRIPTION, description(t.body).ifEmpty { null })
-            putAll(t.extra)
-        }
+    private fun view(t: TaskFile.Task): Map<String, String?> = buildMap {
+        put("title", t.title)
+        put("project", t.project)
+        put("priority", t.priority)
+        put("status", t.status)
+        put("source", t.source)
+        put("created", t.created?.toString())
+        put("due", t.due?.toString())
+        put("done", t.done?.toString())
+        put("tags", t.tags.joinToString(", ").ifEmpty { null })
+        put(DESCRIPTION, description(t.body).ifEmpty { null })
+        putAll(t.extra)
+    }
 
     /**
      * ponytail: описание — это тело файла без строк-чекбоксов и заголовка секции; делить его на
@@ -91,7 +86,9 @@ object ConflictRule {
             .joinToString("\n")
             .trim()
 
-    /** Подзадачи сопоставляются по нормализованному тексту: чужой порядок и удаление — правда git. */
+    /**
+     * Подзадачи сопоставляются по нормализованному тексту: чужой порядок и удаление — правда git.
+     */
     private fun subtasks(
         base: TaskFile.Task,
         mine: TaskFile.Task,

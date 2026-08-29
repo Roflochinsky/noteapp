@@ -71,8 +71,7 @@ sealed interface Edit {
                 DeleteFile -> text
                 is SetTitle -> field(text, TITLE, edit.title)
                 is SetField -> field(text, edit.key, edit.value)
-                is SetStatus ->
-                    field(field(text, STATUS, edit.status), DONE, edit.done?.toString())
+                is SetStatus -> field(field(text, STATUS, edit.status), DONE, edit.done?.toString())
                 is ToggleSubtask -> toggle(text, edit.text, edit.done)
                 is AddSubtask -> add(text, edit.text)
             }
@@ -108,8 +107,7 @@ sealed interface Edit {
         private fun keyOf(line: String): String? =
             line.substringBefore(':').trim().takeIf { it.isNotEmpty() && ':' in line }
 
-        private fun rank(key: String?): Int =
-            ORDER.indexOf(key).takeIf { it >= 0 } ?: ORDER.size
+        private fun rank(key: String?): Int = ORDER.indexOf(key).takeIf { it >= 0 } ?: ORDER.size
 
         private fun insertAt(lines: List<String>, end: Int, key: String): Int {
             val mine = rank(key)
@@ -126,7 +124,9 @@ sealed interface Edit {
             return text.replace("\r\n", "\n").split("\n").joinToString("\n") { line ->
                 val m = CHECKBOX.find(line)
                 if (m != null && normalize(m.groupValues[4]) == want) {
-                    m.groupValues[1] + (if (done) "x" else " ") + m.groupValues[3] +
+                    m.groupValues[1] +
+                        (if (done) "x" else " ") +
+                        m.groupValues[3] +
                         m.groupValues[4]
                 } else {
                     line

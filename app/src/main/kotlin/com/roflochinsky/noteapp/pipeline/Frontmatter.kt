@@ -74,14 +74,18 @@ internal object Frontmatter {
         }
     }
 
-    /** Пустые значения не пишутся вовсе — «поле опускается, если его нет» (ADR). */
+    /**
+     * «Поле опускается, если его нет» (ADR) — то есть отсутствует в карте. Ключ, который в файле
+     * есть, а значения не имеет, пишется без значения: неизвестные ключи не теряются (LLD-9).
+     */
     fun render(fields: Map<String, String>): String =
-        fields.entries
-            .filter { it.value.isNotEmpty() }
-            .joinToString("\n", prefix = "$FENCE\n", postfix = "\n$FENCE\n") { field(it.key, it.value) }
+        fields.entries.joinToString("\n", prefix = "$FENCE\n", postfix = "\n$FENCE\n") {
+            field(it.key, it.value)
+        }
 
     /** Одна строка frontmatter — единственное место, где решается вопрос кавычек. */
-    fun field(key: String, value: String): String = "$key: ${quote(value)}"
+    fun field(key: String, value: String): String =
+        if (value.isEmpty()) "$key:" else "$key: ${quote(value)}"
 
     fun list(value: String?): List<String> =
         value

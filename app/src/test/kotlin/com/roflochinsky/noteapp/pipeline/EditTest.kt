@@ -74,7 +74,8 @@ class EditTest {
                 "- [x] Воспроизвести баг на длинной записи\n- [ ] Экспоненциальный бэкофф в PushWorker",
                 "- [ ] Экспоненциальный бэкофф в PushWorker\n- [x] Воспроизвести баг на длинной записи",
             )
-        val out = Edit.apply(moved, Edit.ToggleSubtask("экспоненциальный  бэкофф в pushworker", true))
+        val out =
+            Edit.apply(moved, Edit.ToggleSubtask("экспоненциальный  бэкофф в pushworker", true))
         assertTrue(out, out.contains("- [x] Экспоненциальный бэкофф в PushWorker"))
         assertTrue("чужая подзадача изменилась", out.contains("- [x] Воспроизвести баг"))
     }
@@ -92,7 +93,10 @@ class EditTest {
     fun `секция подзадач заводится, если её не было`() {
         val bare = "---\ntitle: Купить переходник\nstatus: open\n---\n"
         val out = Edit.apply(bare, Edit.AddSubtask("Проверить USB-C"))
-        assertEquals(listOf("Проверить USB-C"), TaskFile.parse("tasks/x.md", out).subtasks.map { it.text })
+        assertEquals(
+            listOf("Проверить USB-C"),
+            TaskFile.parse("tasks/x.md", out).subtasks.map { it.text },
+        )
         assertTrue(out, out.contains(Edit.SUBTASKS_HEADING))
     }
 

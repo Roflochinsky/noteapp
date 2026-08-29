@@ -21,7 +21,8 @@ class FakeGithubApi(
     var writeCalls = 0
         private set
 
-    var fail: IOException? = null
+    /** Шире IOException: настоящий клиент разбирает ответ через org.json и кидает JSONException. */
+    var fail: Exception? = null
 
     /** «Пока мы правили, в git приехало своё» — вызывается тестом перед ответом на запись. */
     var onWrite: (() -> Unit)? = null
