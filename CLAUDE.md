@@ -19,7 +19,8 @@
 `java` в PATH нет — JDK лежит в `~/.local/java/jdk17` (Temurin 17), отсюда `JAVA_HOME=…` в
 команде. И `local.properties` (`sdk.dir`) не в git — в свежем git-worktree его просто нет,
 Gradle падает на «SDK location not found»; скопировать из основного рабочего дерева:
-`cp ~/code/noteapp/local.properties .`.
+`cp ~/code/noteapp/local.properties .`. Третья мелочь того же класса: `actionlint`
+не в PATH — бинарь лежит в `~/go/bin/actionlint` (v1.7.12, собран из исходников).
 
 Инструменты — лучшие в классе, зафиксировано переносом harness 2026-08-24
 (bd nikitatrubaev-rvw): **ktfmt** (формат, безкомпромиссный), **detekt** (статанализ),
