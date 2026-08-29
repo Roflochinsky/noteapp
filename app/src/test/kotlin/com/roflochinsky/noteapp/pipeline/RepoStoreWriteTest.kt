@@ -52,6 +52,10 @@ class RepoStoreWriteTest {
 
     private fun task(store: RepoStore) = store.view().tasks.single { it.path == path }
 
+    /** Гонки редкие — ловим повтором, а не сном в боевом коде. */
+    private val races = 200
+    private val reads = 200
+
     @Test
     fun `галочка видна сразу и без сети, в репо пока ничего`() {
         val api = api()
@@ -335,6 +339,57 @@ class RepoStoreWriteTest {
         assertTrue("коммит должен уйти в репо", api.text(path)!!.contains("status: done"))
         assertFalse("очередь пуста — янтарь гаснет", path in store.view().pending)
         assertTrue("ГАЛОЧКА ОТСКОЧИЛА: обновление затёрло коммит отправки", task(store).isDone)
+    }
+
+    /**
+     * Плашка забирает сообщение «прочитать и стереть», а воркер в этот момент говорит своё: между
+     * `readText()` и `delete()` сообщение стиралось непрочитанным — ровно то свойство, ради
+     * которого в `say()` появился `appendText`. Замком не лечится: [RepoStore.view] зовёт главный
+     * поток, а монитор `push` держит через сеть.
+     */
+    @Test
+    fun `сообщение воркера не теряется, пока плашка забирает прежнее`() {
+        repeat(races) {
+            val api = api()
+            val store = ready(api)
+            api.remove(path) // задачу унесли из репо: правка даст 404 и сообщение владельцу
+            store.setStatus(path, TaskFile.STATUS_DONE)
+            val seen = java.util.concurrent.atomic.AtomicReference<String?>(null)
+            val reader = Thread { repeat(reads) { store.view().notice?.let(seen::set) } }
+            api.onWrite = { reader.start() }
+            store.push()
+            reader.join()
+            assertNotNull(
+                "сообщение воркера стёрто непрочитанным",
+                seen.get() ?: store.view().notice,
+            )
+        }
+    }
+
+    /**
+     * Пока PUT в полёте, владелец правит то же поле: `enqueue` склеивает новую правку В ТОТ ЖЕ id
+     * (склейка по «путь + цель»), а `drop` снимал операцию по id — вместе с ещё не отправленной
+     * правкой. Расширять замок нельзя: `push` держит монитор через сеть, и владелец ждал бы минуту
+     * (блокер Б1, третье место).
+     */
+    @Test
+    fun `правка во время отправки не съедается снятием операции`() {
+        val api = api()
+        val store = ready(api)
+        store.setStatus(path, TaskFile.STATUS_DONE)
+        api.onWrite = {
+            store.setStatus(path, TaskFile.STATUS_OPEN)
+            api.onWrite = null
+        }
+        assertEquals(RepoStore.Push.MORE, store.push())
+        assertTrue("снятие во время отправки съедено drop(op)", path in store.view().pending)
+        assertFalse(
+            "ГАЛОЧКА ОТСКОЧИЛА: снятие во время отправки съедено drop(op)",
+            task(store).isDone,
+        )
+        assertEquals(RepoStore.Push.MORE, store.push())
+        assertEquals(RepoStore.Push.EMPTY, store.push())
+        assertTrue("вторая правка так и не доехала", api.text(path)!!.contains("status: open"))
     }
 
     /**

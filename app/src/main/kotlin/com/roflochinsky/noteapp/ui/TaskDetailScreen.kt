@@ -284,8 +284,11 @@ private fun StatusSegment(status: String, onStatus: (String) -> Unit) {
             Box(
                 modifier =
                     Modifier.weight(1f)
-                        .semantics(mergeDescendants = true) {}
                         .background(if (on) DocPalette.BlueSoft else DocPalette.Paper)
+                        // Роль «переключатель»: TalkBack читает «в работе, выбрано», а не просто
+                        // подпись — иначе `in_progress` на слух неотличимо (вердикт UX). Высота —
+                        // по компу 38dp: недостающие 5dp сверху и снизу добирает near-hit Compose.
+                        .selectable(selected = on, role = Role.RadioButton) { onStatus(value) }
                         .height(SEG.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -296,11 +299,6 @@ private fun StatusSegment(status: String, onStatus: (String) -> Unit) {
                             color = if (on) DocPalette.Blue else DocPalette.Mut,
                             fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
                         ),
-                )
-                // Роль «переключатель»: TalkBack читает «в работе, выбрано», а не просто подпись —
-                // иначе состояние `in_progress` на слух неотличимо (вердикт UX).
-                TouchStripe(
-                    Modifier.selectable(selected = on, role = Role.RadioButton) { onStatus(value) }
                 )
             }
         }
@@ -345,17 +343,11 @@ private fun Fields(
                 task.tags.forEach { tag ->
                     RemovableTag(tag) { onEdit(Edit.SetField("tags", tagsValue(task.tags - tag))) }
                 }
-                Box(
-                    modifier = Modifier.semantics(mergeDescendants = true) {},
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        "+ тег",
-                        style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.Blue),
-                        modifier = Modifier.padding(horizontal = 8.dp),
-                    )
-                    TouchStripe(Modifier.clickable { onSheet(Sheet.TAG) })
-                }
+                Text(
+                    "+ тег",
+                    style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.Blue),
+                    modifier = Modifier.clickable { onSheet(Sheet.TAG) }.padding(horizontal = 8.dp),
+                )
             }
         }
         HorizontalDivider(color = DocPalette.Line)
@@ -413,11 +405,9 @@ private fun FieldRow(
  * Строки подзадач — по компу (`.task{padding:8px 0}` ≈ 37px), а не 48dp каждая: на четырёх
  * подзадачах блок распухал примерно на 50dp (находка Д10).
  *
- * ponytail: прозрачной полосы-таргета ([TouchStripe]) здесь НЕТ, в отличие от чипов и сегмента, и
- * это не забывчивость. Полосы соседних строк легли бы внахлёст (строки идут вплотную), а в нахлёсте
- * побеждает та, что нарисована позже, — тап по нижнему краю строки переключал бы СЛЕДУЮЩУЮ
- * подзадачу. Молча переключить не ту — хуже, чем таргет в 37dp: строка кликабельна во всю ширину
- * экрана, и промахнуться мимо неё некуда, промах бывает только между соседями.
+ * Развилка Д10 («вешать ли строкам таргет поверх») закрыта: строки кликабельны во всю ширину и идут
+ * вплотную, то есть тап по любой из них — НАСТОЯЩЕЕ попадание, а оно всегда сильнее near-hit соседа
+ * (см. [TOUCH]). Переключить не ту подзадачу платформа не даст.
  */
 @Composable
 private fun Subtasks(task: TaskFile.Task, onEdit: (Edit) -> Unit, onAdd: () -> Unit) {
@@ -505,11 +495,14 @@ private fun SubCheckbox(done: Boolean) {
 @Composable
 private fun Source(source: String, onOpen: (String) -> Unit) {
     Row(
+        // Высота — по компу (`.momentlink{margin-top:10px}`, сама ссылка ≈18dp), а не 48dp:
+        // недостающее добирает near-hit Compose (см. [TOUCH]). Отступ снаружи клика — подсветка
+        // тапа не должна залезать на подзадачи.
         modifier =
             Modifier.fillMaxWidth()
+                .padding(top = 10.dp)
                 .clickable { onOpen(source) }
-                .padding(horizontal = 22.dp)
-                .height(TOUCH.dp),
+                .padding(horizontal = 22.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -610,14 +603,20 @@ private fun ActionButton(
 }
 
 /**
- * Крестик у тега рисуется в самом чипе — отдельного режима правки нет. Сносит тег ТОЛЬКО крестик:
- * полоса-таргет висит на нём, а не на чипе, и тап по тексту тег не убивает (подтверждения у такой
- * мелочи быть не должно). Прежний `Box(size = TOUCH)` по `CenterEnd` обещал то же самое, а на
- * коротком теге (`#a` ≈ 38dp) накрывал чип целиком — и тянул высоту строки к 48dp.
+ * Крестик у тега рисуется в самом чипе — отдельного режима правки нет. Сносит тег ТОЛЬКО крестик, и
+ * кликабелен ровно он: 12dp иконка плюс отступ. Тап по тексту тег не убивает (подтверждения у такой
+ * мелочи быть не должно).
  *
- * ponytail: по горизонтали таргет уже 48dp — это ширина крестика. Расширять некуда: полоса залезла
- * бы на соседний тег (зазор по компу 6dp) и сносила бы не тот. Промах по вертикали прощён — там
- * пусто; промах по горизонтали безопасен: он просто ничего не делает.
+ * Мазок вокруг крестика добирает near-hit Compose (см. [TOUCH]) — и это лучше прежней прозрачной
+ * полосы 48dp: полоса была НАСТОЯЩИМ попаданием и при переносе тегов на второй ряд молча сносила
+ * тег из первого. Near-hit так не может: настоящее попадание всегда сильнее, а между двумя
+ * промахами побеждает ближайший.
+ *
+ * ponytail: остаточный риск — тап по левому краю чипа второго ряда, если прямо над ним стоит
+ * крестик первого; near-hit-мазок крестика (18dp по вертикали) туда дотягивается, а текст чипа
+ * кликабельным делать нельзя (тогда тег сносился бы тапом по имени). Разводить ряды вертикально
+ * комп не даёт (`spacedBy(2.dp)`); лечится только вторым рядом, которого у одной задачи почти не
+ * бывает.
  */
 @Composable
 private fun RemovableTag(tag: String, onRemove: () -> Unit) {
@@ -628,19 +627,16 @@ private fun RemovableTag(tag: String, onRemove: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("#$tag", style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.Ink))
-        Box(contentAlignment = Alignment.Center) {
-            Icon(
-                Icons.Filled.Close,
-                contentDescription = null,
-                tint = DocPalette.Mut,
-                modifier = Modifier.size(12.dp).padding(start = 2.dp),
-            )
-            TouchStripe(
-                Modifier.clickable(onClick = onRemove).semantics {
-                    contentDescription = "убрать тег #$tag"
-                }
-            )
-        }
+        Icon(
+            Icons.Filled.Close,
+            contentDescription = null,
+            tint = DocPalette.Mut,
+            modifier =
+                Modifier.clickable(onClick = onRemove)
+                    .semantics { contentDescription = "убрать тег #$tag" }
+                    .size(12.dp)
+                    .padding(start = 2.dp),
+        )
     }
 }
 

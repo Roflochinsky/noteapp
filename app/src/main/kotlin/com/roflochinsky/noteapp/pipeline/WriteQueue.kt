@@ -14,18 +14,26 @@ import org.json.JSONObject
  *
  * Склейка — по паре «путь + цель правки»: два тапа по одному чекбоксу дают одну операцию (побеждает
  * последняя), а правка соседнего поля живёт своей.
+ *
+ * Журнал трогают двое: главный поток (правка владельца) и воркер записи (снятие отправленного). У
+ * журнала поэтому свой монитор — на все публичные методы. Он держится микросекунды: тут только
+ * файлы, сети нет. Монитор [RepoStore] сюда не годится: [RepoStore.push] держит его через сеть, и
+ * правка владельца ждала бы до минуты.
  */
 class WriteQueue(private val dir: File) {
 
     data class Op(val id: String, val path: String, val edit: Edit, val attempt: Int = 0)
 
     /** Операции в порядке появления; битые файлы пропускаются, а не роняют очередь. */
+    @Synchronized
     fun pending(): List<Op> =
         files().mapNotNull { file -> runCatching { read(file) }.getOrNull() }.toList()
 
+    @Synchronized
     fun enqueue(path: String, edit: Edit): Op {
         val now = pending()
-        if (edit is Edit.DeleteFile) now.filter { it.path == path }.forEach { drop(it.id) }
+        if (edit is Edit.DeleteFile)
+            now.filter { it.path == path }.forEach { File(dir, "${it.id}$EXT").delete() }
         val same = now.firstOrNull { it.path == path && it.edit.target == edit.target }
         val op = Op(same?.id ?: nextId(), path, edit)
         write(op)
@@ -33,18 +41,43 @@ class WriteQueue(private val dir: File) {
     }
 
     /** Отмена снекбаром: операция ещё не ушла — просто убираем её из журнала. */
-    fun cancel(id: String) = drop(id)
+    @Synchronized fun cancel(id: String) = File(dir, "$id$EXT").delete()
 
-    fun done(op: Op) = drop(op.id)
+    /**
+     * Снятие отправленной операции — условное, по содержимому, а не по id. Пока PUT был в полёте,
+     * владелец мог поправить то же поле: склейка кладёт новую правку В ТОТ ЖЕ файл журнала, и
+     * удаление по id снесло бы её вместе с отправленной (блокер Б1). Изменилась — операция остаётся
+     * и уедет следующим заходом; отправленную правку к тому моменту уже держит кэш.
+     *
+     * ponytail: сверка обычным `equals` прочитанной операции, без версий и отпечатков — `Op` и все
+     * `Edit` data-классы. Расширять замок `push` нельзя: он держит монитор через сеть (до трёх
+     * запросов по 60 секунд), и правка владельца ждала бы минуту.
+     */
+    @Synchronized
+    fun done(op: Op) {
+        if (unchanged(op)) File(dir, "${op.id}$EXT").delete()
+    }
 
-    fun retry(op: Op): Op = op.copy(attempt = op.attempt + 1).also { write(it) }
+    /**
+     * Повтор после 409 — тоже условный: если владелец успел склеить свою правку в тот же файл,
+     * переписывать её старой операцией нельзя. Свежая правка ляжет поверх чужого текста, который
+     * ветка 409 уже положила в кэш.
+     */
+    @Synchronized
+    fun retry(op: Op): Op {
+        val next = op.copy(attempt = op.attempt + 1)
+        if (unchanged(op)) write(next)
+        return next
+    }
+
+    /** Операция в журнале — та же, что читала отправка? Сверяем содержимым, не id. */
+    private fun unchanged(op: Op): Boolean =
+        File(dir, "${op.id}$EXT")
+            .takeIf { it.exists() }
+            ?.let { runCatching { read(it) }.getOrNull() } == op
 
     private fun files(): Sequence<File> =
         dir.listFiles().orEmpty().filter { it.name.endsWith(EXT) }.sortedBy { it.name }.asSequence()
-
-    private fun drop(id: String) {
-        File(dir, "$id$EXT").delete()
-    }
 
     private fun nextId(): String {
         val last =

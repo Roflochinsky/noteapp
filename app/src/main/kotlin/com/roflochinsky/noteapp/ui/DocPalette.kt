@@ -1,50 +1,37 @@
 package com.roflochinsky.noteapp.ui
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * Минимальная сторона тач-таргета в dp (правило доступности). Видимый элемент может быть меньше —
- * его накрывает прозрачная полоса этого размера ([TouchStripe]). Один на весь пакет: до фикс-цикла
- * Н2 константа была заведена в четырёх файлах разметки.
+ * Минимальная сторона тач-таргета в dp (правило доступности). Растягивать до неё ВИДИМЫЙ элемент не
+ * нужно и вредно — комп задаёт чип 31dp, сегмент 38dp, строку подзадачи 37dp: промах в пределах
+ * 48dp Compose засчитывает сам (`NodeCoordinator.hitTest` → `hitNear`, радиус
+ * `ViewConfiguration.minimumTouchTargetSize` = 48×48dp, дефолт интерфейса,
+ * `AndroidViewConfiguration` его не переопределяет). Константа остаётся для мест, где 48dp — это
+ * ИМЕННО высота по компу.
+ *
+ * Проверено байткодом ui 1.7.6 и material3 1.3.1 (`javap -p -c` по распакованным `ui-release.aar` /
+ * `material3-release.aar` из `~/.gradle/caches`), чтобы следующий не переспрашивал:
+ * - спор двух соседей решается РАССТОЯНИЕМ: `HitTestResult.isHitInMinimumTouchTargetBetter` берёт
+ *   новый near-hit, только если он строго ближе (`DistanceAndInLayer.compareTo`: сперва «внутри
+ *   слоя», потом `signum(distance)`); порядок отрисовки решает лишь ничью;
+ * - НАСТОЯЩЕЕ попадание (`hit`, расстояние `-1f`) всегда перебивает любой near-hit соседа — поэтому
+ *   у идущих вплотную кликабельных строк (подзадачи) промаха на соседа не бывает;
+ * - near-hit не opt-in: он у любого `PointerInputModifierNode`, `clickable` ничего не включает.
+ *   Единственное условие — палец (`PointerType.Touch`); для мыши и стилуса near-hit выключен;
+ * - `Modifier.minimumInteractiveComponentSize()` нам не годится: он берёт `max(placeable.height,
+ *   48dp)` и отдаёт это в `layout()`, то есть двигает РАЗМЕТКУ и соседей;
+ * - клипящий предок (`clip`, `Surface`, `Card`) размером ≥48×48 near-hit наружу себя обнуляет.
  */
 internal const val TOUCH = 48
-
-/**
- * Прозрачная полоса-таргет в 48dp поверх элемента, который по компу ниже: чип — 31dp
- * (`.chip{padding:7px 12px}`), сегмент статуса — 38dp (`.seg button{padding:10px 4px}`), крестик
- * тега — 12dp.
- *
- * Разметку полоса не двигает: `matchParentSize` выводит её из подсчёта размера родителя, а
- * `requiredHeight` снимает его ограничения, поэтому полоса вылезает за строку вверх и вниз.
- * `Box(Modifier.height(TOUCH))` ВОКРУГ содержимого так не умеет — он тянет вверх весь ряд, и ряд из
- * одних чипов вырастает с 31 до 48dp, а подложка сегмента и разделители — с 38 до 48 (находки
- * повторного ревью Н2).
- *
- * Родителю нужен `contentAlignment = Alignment.Center` — иначе полоса ляжет не по центру элемента.
- * Кликабельность и роль приходят в [modifier]; чтобы TalkBack читал подпись, а не безымянную
- * кнопку, родитель метится `semantics(mergeDescendants = true)`.
- *
- * ponytail: у двух соседних рядов чипов полосы перекрываются — тап в зазор достаётся тому ряду, что
- * нарисован позже. Это цена таргета, который больше самого элемента; расходить ряды вертикальными
- * интервалами шире 8dp комп не даёт.
- */
-@Composable
-internal fun BoxScope.TouchStripe(modifier: Modifier) {
-    Box(Modifier.matchParentSize().requiredHeight(TOUCH.dp).then(modifier))
-}
 
 /** Мир «Документ» (комп nikitatrubaev-pdj.4): холодная бумага, найви, синий; коралл только REC. */
 object DocPalette {

@@ -20,6 +20,9 @@ class WriteQueueTest {
 
     private fun queue(dir: java.io.File) = WriteQueue(dir)
 
+    /** Гонка редкая — ловим её повтором, а не сном в боевом коде. */
+    private val races = 300
+
     @Test
     fun `два быстрых тапа по одному полю дают одну операцию`() {
         val q = queue(tmp.newFolder())
@@ -81,6 +84,28 @@ class WriteQueueTest {
         val op = q.enqueue(path, Edit.CreateTask("---\ntitle: Новая\n---\n"))
         q.done(op)
         assertEquals(emptyList<WriteQueue.Op>(), queue(dir).pending())
+    }
+
+    /**
+     * Отправка снимает операцию, владелец в тот же миг правит то же поле: склейка кладёт правку в
+     * ТОТ ЖЕ файл журнала. Проверка «не менялась» спасает от долгого окна (сеть), монитор — от
+     * короткого, между чтением файла и его удалением. Правка обязана пережить оба.
+     */
+    @Test
+    fun `правку, склеенную во время снятия операции, журнал не теряет`() {
+        repeat(races) {
+            val q = queue(tmp.newFolder())
+            val stale = q.enqueue(path, Edit.SetField("priority", "P1"))
+            val writer = Thread { q.enqueue(path, Edit.SetField("priority", "P3")) }
+            writer.start()
+            q.done(stale)
+            writer.join()
+            assertEquals(
+                "правка владельца съедена снятием отправленной операции",
+                listOf(Edit.SetField("priority", "P3")),
+                q.pending().map { it.edit },
+            )
+        }
     }
 
     @Test

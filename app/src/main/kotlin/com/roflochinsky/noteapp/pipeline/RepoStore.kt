@@ -48,6 +48,9 @@ class RepoStore(
     private val snapshot: RepoCache.Snapshot
         get() = cache.snapshot()
 
+    /** Замок файла сообщений: сетью не занят, поэтому главный поток на нём не залипает. */
+    private val notices = Any()
+
     /**
      * Всё, что экран рисует прямо сейчас: задачи из кэша поверх ожидающих правок (решение LLD-5),
      * пути в янтарном «в очереди» и разовое сообщение о расхождении. Один вызов, а не четыре: иначе
@@ -115,13 +118,21 @@ class RepoStore(
     /** Отмена снекбаром до отправки: операция снимается, второго коммита не будет. */
     fun cancel(id: String) = queue.cancel(id)
 
-    /** Расхождение по 409 показывается один раз и плашкой, не модалкой (вердикт UX). */
-    private fun takeDivergence(): String? {
-        val file = File(cache.dir, DIVERGENCE)
-        val text = file.takeIf { it.exists() }?.readText()?.takeIf { it.isNotBlank() }
-        file.delete()
-        return text
-    }
+    /**
+     * Расхождение по 409 показывается один раз и плашкой, не модалкой (вердикт UX).
+     *
+     * Чтение и стирание — под [notices], иначе [say] воркера, попавший между `readText()` и
+     * `delete()`, стирается непрочитанным (ровно то свойство, ради которого там появился
+     * `appendText`). Монитор нужен СВОЙ: замок [push] держится через сеть, а сюда ходит главный
+     * поток. Под [notices] сети нет — только два файловых вызова.
+     */
+    private fun takeDivergence(): String? =
+        synchronized(notices) {
+            val file = File(cache.dir, DIVERGENCE)
+            val text = file.takeIf { it.exists() }?.readText()?.takeIf { it.isNotBlank() }
+            file.delete()
+            text
+        }
 
     /**
      * Обновление и отправка — единственные два места, которые кэш переписывают, и в одном процессе
@@ -132,8 +143,19 @@ class RepoStore(
      *
      * ponytail: обычный монитор, а не файловая блокировка и не `Mutex`. Писатель один — воркер
      * живёт в том же процессе, что и экран (`android:process` в манифесте нет), а сами методы
-     * блокирующие. Потолок: pull-to-refresh ждёт один сетевой запрос отправки; паузу в секунду
-     * между мутациями воркер держит между вызовами [push], то есть вне замка.
+     * блокирующие.
+     *
+     * **Честный потолок ожидания — минуты, а не «один запрос».** [GithubClient.TIMEOUT_MS] — 60
+     * секунд и на соединение, и на чтение, а под замком висит не один запрос:
+     * - pull-to-refresh ждёт [push]: PUT, а на 409 ещё чтение чужого файла и повтор — до трёх
+     *   запросов подряд;
+     * - воркер записи ждёт [refresh]: чтение ref, чтение дерева и по блобу на КАЖДЫЙ изменившийся
+     *   файл — на холодном старте это всё дерево задач.
+     *
+     * Терпимо ровно потому, что монитор берут только эти двое и оба — фоновые: главный поток правит
+     * через [edit]/[create]/[cancel], а они замка не берут вовсе (журнал очереди сторожит свой
+     * собственный монитор, сетью не занятый). Пауза в секунду между мутациями держится между
+     * вызовами [push], то есть вне замка.
      */
     @Synchronized
     fun refresh(): SyncStatus {
@@ -294,11 +316,12 @@ class RepoStore(
      * несколько операций (чужое удаление, наш баг), и владелец должен увидеть все, а не только
      * последнюю. Плашка читает файл целиком и стирает его (см. [takeDivergence]).
      */
-    private fun say(text: String) {
-        cache.dir.mkdirs()
-        val file = File(cache.dir, DIVERGENCE)
-        file.appendText(if (file.length() == 0L) text else "\n$text")
-    }
+    private fun say(text: String) =
+        synchronized(notices) {
+            cache.dir.mkdirs()
+            val file = File(cache.dir, DIVERGENCE)
+            file.appendText(if (file.length() == 0L) text else "\n$text")
+        }
 
     private fun drop(op: WriteQueue.Op): Push {
         queue.done(op)

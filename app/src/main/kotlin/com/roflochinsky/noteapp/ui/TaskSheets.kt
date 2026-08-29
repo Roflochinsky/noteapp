@@ -46,7 +46,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -394,26 +393,17 @@ fun NewTaskSheet(
 
 /**
  * Чип по компу: рамка, активный — синий на подложке; шеврон у тех, что открывают выбор. Высоту ряда
- * задаёт сам чип (`.chip{padding:7px 12px}` ≈ 31dp), а кликается полоса в 48dp поверх него: ряд
- * шторки создания состоит из одних чипов, и `Box(height = TOUCH)` вокруг чипа растил весь ряд до
- * 48dp, а при переносе — вдвое (находка повторного ревью).
+ * задаёт сам чип (`.chip{padding:7px 12px}` ≈ 31dp) — растягивать его до 48dp нельзя: ряд шторки
+ * создания состоит из одних чипов и вырастал весь, а при переносе — вдвое. Недостающие 8,5dp сверху
+ * и снизу добирает near-hit Compose (см. [TOUCH]); заодно тап в зазор `spacedBy` достаётся
+ * БЛИЖАЙШЕМУ чипу, а не тому, что нарисован позже.
  */
 @Composable
 private fun Chip(label: String, on: Boolean, chevron: Boolean = false, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier.semantics(mergeDescendants = true) {},
-        contentAlignment = Alignment.Center,
-    ) {
-        ChipFace(label, on, chevron)
-        TouchStripe(Modifier.clickable(onClick = onClick))
-    }
-}
-
-@Composable
-private fun ChipFace(label: String, on: Boolean, chevron: Boolean) {
     Row(
         modifier =
-            Modifier.border(
+            Modifier.clickable(onClick = onClick)
+                .border(
                     1.dp,
                     if (on) DocPalette.Blue else DocPalette.Line,
                     RoundedCornerShape(9.dp),
