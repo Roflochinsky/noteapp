@@ -156,4 +156,90 @@ class TaskFilterTest {
             TaskFilter.byPriority(tasks, today).flatMap { it.second }.map { it.title },
         )
     }
+
+    // ── чипы, счётчики и поиск (срез Н3) ──────────────────────────────────────────────────
+
+    private val zoo =
+        listOf(
+            task("Фикс ретраев", priority = "P1").copy(project = "tgsum"),
+            task("Экспорт тем").copy(project = "tgsum"),
+            task("Виджет очереди").copy(project = "noteapp"),
+            task("Забрать посылку"),
+            task("Разобрать фото", priority = "P3", status = TaskFile.STATUS_IN_PROGRESS),
+            task("Старый долг", status = TaskFile.STATUS_DONE, done = "2026-08-25")
+                .copy(project = "tgsum"),
+        )
+
+    private fun titles(filter: TaskFilter.Filter) = filter.select(zoo).map { it.title }.toSet()
+
+    @Test
+    fun `чипы сужают список и складываются друг с другом`() {
+        assertEquals(
+            setOf("Фикс ретраев", "Экспорт тем", "Старый долг"),
+            titles(TaskFilter.Filter(project = "tgsum")),
+        )
+        assertEquals(
+            setOf("Фикс ретраев"),
+            titles(TaskFilter.Filter(project = "tgsum", priority = "P1")),
+        )
+        assertEquals(
+            setOf("Фикс ретраев", "Экспорт тем"),
+            titles(TaskFilter.Filter(project = "tgsum", status = TaskFile.STATUS_OPEN)),
+        )
+    }
+
+    @Test
+    fun `«Без проекта» — своё значение фильтра, а не «любой проект»`() {
+        assertEquals(
+            setOf("Забрать посылку", "Разобрать фото"),
+            titles(TaskFilter.Filter(project = TaskFilter.NO_PROJECT)),
+        )
+        assertEquals(zoo.map { it.title }.toSet(), titles(TaskFilter.Filter()))
+    }
+
+    /** Вердикт UX: свой фильтр из расчёта исключён — иначе у невыбранных значений всегда 0. */
+    @Test
+    fun `счётчик в шторке фасетный — свой фильтр в расчёт не идёт`() {
+        val filter = TaskFilter.Filter(project = "tgsum")
+        val counts = filter.counts(zoo, TaskFilter.Facet.PROJECT, listOf("tgsum", "noteapp"))
+        assertEquals(3, counts["tgsum"])
+        // noteapp остался бы нулём, если бы «Проект: tgsum» считали вместе со своим же фасетом.
+        assertEquals(1, counts["noteapp"])
+        // «Все проекты» — сколько станет, если сбросить именно этот чип.
+        assertEquals(zoo.size, counts[null])
+    }
+
+    @Test
+    fun `чужие фильтры счётчик учитывает — иначе он обещает больше, чем покажет`() {
+        val filter = TaskFilter.Filter(priority = "P1", project = "tgsum")
+        val counts = filter.counts(zoo, TaskFilter.Facet.PROJECT, listOf("tgsum", "noteapp"))
+        assertEquals(1, counts["tgsum"])
+        assertEquals(0, counts["noteapp"])
+    }
+
+    @Test
+    fun `значение реестра без задач остаётся в шторке со счётчиком 0`() {
+        val counts = TaskFilter.Filter().counts(zoo, TaskFilter.Facet.PROJECT, listOf("workwatch"))
+        assertEquals(0, counts["workwatch"])
+    }
+
+    @Test
+    fun `поиск — подстрока заголовка, регистр не важен, поверх активных фильтров`() {
+        assertEquals(setOf("Фикс ретраев"), titles(TaskFilter.Filter(query = "ретра")))
+        assertEquals(setOf("Фикс ретраев"), titles(TaskFilter.Filter(query = "ФИКС")))
+        assertEquals(setOf("Разобрать фото"), titles(TaskFilter.Filter(query = "  фото ")))
+        assertEquals(
+            emptySet<String>(),
+            titles(TaskFilter.Filter(project = "noteapp", query = "фото")),
+        )
+    }
+
+    @Test
+    fun `пусто под фильтром — не то же, что «задач нет вовсе»`() {
+        val filter = TaskFilter.Filter(project = "workwatch")
+        assertTrue(filter.active)
+        assertFalse(TaskFilter.Filter().active)
+        assertTrue(TaskFilter.nothingToShow(filter.select(zoo), today))
+        assertFalse(TaskFilter.nothingToShow(zoo, today))
+    }
 }

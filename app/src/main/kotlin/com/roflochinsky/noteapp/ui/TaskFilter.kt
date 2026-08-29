@@ -16,6 +16,84 @@ object TaskFilter {
 
     val PRIORITIES = listOf("P1", "P2", "P3")
 
+    val STATUSES = listOf(TaskFile.STATUS_OPEN, TaskFile.STATUS_IN_PROGRESS, TaskFile.STATUS_DONE)
+
+    /**
+     * «Без проекта» как значение фильтра. Пустой `project` у задачи и «не фильтруем по проекту» —
+     * разные вещи, а `null` в [Filter] уже занят вторым, поэтому первому нужен свой знак. Символ
+     * непечатный и записан escape-последовательностью: проекта с таким именем в `projects.md` не
+     * заведёшь, а сырой байт в исходнике сделал бы файл для git бинарным — дифф и `blame` по нему
+     * пропали бы.
+     */
+    const val NO_PROJECT = "\u0000"
+
+    /** Чип, он же ось фильтра: у каждой своя шторка со своими счётчиками. */
+    enum class Facet {
+        PROJECT,
+        PRIORITY,
+        STATUS,
+    }
+
+    /**
+     * Состояние чипов и строки поиска. `null` в поле — «этот чип сброшен». Поиск — подстрочный по
+     * заголовку задачи (решение владельца 2026-08-26 (а)): отдельного экрана нет, он сужает список
+     * поверх активных фильтров.
+     */
+    data class Filter(
+        val project: String? = null,
+        val priority: String? = null,
+        val status: String? = null,
+        val query: String = "",
+    ) {
+        /** Хоть один чип нажат или что-то введено — значит пусто «под фильтром», а не «вообще». */
+        val active: Boolean
+            get() = project != null || priority != null || status != null || query.isNotBlank()
+
+        fun of(facet: Facet): String? =
+            when (facet) {
+                Facet.PROJECT -> project
+                Facet.PRIORITY -> priority
+                Facet.STATUS -> status
+            }
+
+        fun with(facet: Facet, value: String?): Filter =
+            when (facet) {
+                Facet.PROJECT -> copy(project = value)
+                Facet.PRIORITY -> copy(priority = value)
+                Facet.STATUS -> copy(status = value)
+            }
+
+        /** Что остаётся от списка под этими чипами и этим поиском. */
+        fun select(tasks: List<TaskFile.Task>): List<TaskFile.Task> {
+            val text = query.trim()
+            return tasks.filter { task ->
+                (project == null || (task.project ?: NO_PROJECT) == project) &&
+                    (priority == null || task.priority == priority) &&
+                    (status == null || task.status == status) &&
+                    (text.isEmpty() || task.title.contains(text, ignoreCase = true))
+            }
+        }
+
+        /**
+         * Счётчики для шторки одного чипа. **Фасетные** (вердикт UX): свой фильтр из расчёта
+         * исключён — иначе у всех невыбранных значений стоял бы ноль и шторка стала бы бесполезной.
+         * Чужие чипы учитываются: счётчик обещает ровно то, что владелец увидит после выбора.
+         *
+         * Ключ `null` — строка «Все …»: сколько станет, если сбросить именно этот чип. Значения из
+         * реестра, которых нет ни у одной задачи, остаются со счётчиком 0 — их не прячем.
+         */
+        fun counts(
+            tasks: List<TaskFile.Task>,
+            facet: Facet,
+            values: List<String>,
+        ): Map<String?, Int> {
+            val rest = with(facet, null).select(tasks)
+            return (listOf(null) + values).associateWith { value ->
+                if (value == null) rest.size else Filter().with(facet, value).select(rest).size
+            }
+        }
+    }
+
     fun open(tasks: List<TaskFile.Task>, today: LocalDate): List<TaskFile.Task> =
         tasks.filterNot { it.isDone }.sortedWith(order(today))
 

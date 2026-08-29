@@ -26,6 +26,17 @@ interface GithubApi {
     fun putFile(path: String, content: String, message: String, sha: String?): Written
 
     @Throws(IOException::class) fun deleteFile(path: String, message: String, sha: String): Written
+
+    /**
+     * Пачка правок **одним** коммитом через git data API (research §7.2): дерево поверх `base_tree`
+     * → коммит → `PATCH ref` с `force: false`. Применяется целиком или не применяется вовсе — ровно
+     * это свойство нужно миграции («один коммит, откатываемый одним `revert`») и удалению заметки
+     * вместе с её задачами. Тела запросов собирает чистый [BatchPlan].
+     *
+     * Пустая пачка коммита не делает и в сеть не ходит: `commitSha` в ответе пустой.
+     */
+    @Throws(IOException::class)
+    fun commitBatch(changes: List<BatchPlan.Change>, message: String): Written
 }
 
 /**

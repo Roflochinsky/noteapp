@@ -95,15 +95,19 @@ class RepoStore(
         val tasks: List<TaskFile.Task>,
         val pending: Set<String>,
         val notice: String?,
+        /** Значения чипа «Проект» — из реестра `projects.md`, а не из проставленного в задачах. */
+        val projects: List<String> = emptyList(),
     )
 
     fun view(): View {
         val ops = queue.pending()
+        val snapshot = snapshot
         return View(
             revision = revision(ops),
-            tasks = overlay(ops).map { (path, text) -> TaskFile.parse(path, text) },
+            tasks = overlay(ops, snapshot).map { (path, text) -> TaskFile.parse(path, text) },
             pending = ops.map { it.path }.toSet(),
             notice = takeDivergence(),
+            projects = Registry.names(snapshot.files[Registry.PROJECTS]?.text),
         )
     }
 
@@ -214,7 +218,7 @@ class RepoStore(
             val known = snapshot.files
             val files =
                 tree
-                    .filterKeys { isTask(it) }
+                    .filterKeys { isTask(it) || it in REGISTRIES }
                     .mapValues { (path, sha) ->
                         // Путь с ожидающей правкой не перечитываем: кэш держит базу слияния.
                         known[path]?.takeIf { it.sha == sha || path in waiting }
@@ -407,7 +411,10 @@ class RepoStore(
         cache.stamp() + ops.joinToString(",") { "${it.id}#${it.attempt}" }
 
     /** Кэш + журнал: то, что владелец видит на экране прямо сейчас. */
-    private fun overlay(ops: List<WriteQueue.Op>): Map<String, String> {
+    private fun overlay(
+        ops: List<WriteQueue.Op>,
+        snapshot: RepoCache.Snapshot,
+    ): Map<String, String> {
         val texts = LinkedHashMap<String, String>()
         snapshot.files.filterKeys { isTask(it) }.forEach { (path, e) -> texts[path] = e.text }
         ops.filter { isTask(it.path) }
@@ -450,6 +457,9 @@ class RepoStore(
         private const val HTTP_UNPROCESSABLE = 422
         private const val HTTP_TOO_MANY = 429
         private const val QUEUE = "queue"
+
+        /** Не задачи, но приложению нужны: значения чипов приходят отсюда. */
+        private val REGISTRIES = setOf(Registry.PROJECTS, Registry.PEOPLE)
         private const val DIVERGENCE = "divergence.txt"
 
         /** Кэш репо на телефоне — `files/repo/`. */

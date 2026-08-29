@@ -126,6 +126,34 @@ class RepoStoreTest {
         assertEquals(SyncStatus.OFFLINE, store.refresh())
     }
 
+    /**
+     * Значения чипа «Проект» приходят из `projects.md`, а не из того, что уже проставлено в
+     * задачах: иначе проект без задач в шторке не покажется и счётчика 0 у него не будет (вердикт
+     * UX, срез Н3).
+     */
+    @Test
+    fun `реестр проектов приезжает обновлением и виден экрану`() {
+        val dir = tmp.newFolder()
+        val api = api()
+        api.put("projects.md", "# Проекты\n\n- tgsum — суммаризатор\n- workwatch — трекер\n")
+        val store = store(dir, api)
+        store.refresh()
+        assertEquals(listOf("tgsum", "workwatch"), store.view().projects)
+        // Реестр — не задача: в список задач он не попадает.
+        assertEquals(2, store.view().tasks.size)
+        // И переживает перезапуск вместе с кэшем.
+        assertEquals(listOf("tgsum", "workwatch"), store(dir, null).view().projects)
+    }
+
+    @Test
+    fun `реестра в репо нет — список проектов пуст, экран не падает`() {
+        val api = FakeGithubApi()
+        api.put("tasks/a.md", "---\ntitle: A\n---\n")
+        val store = RepoStore(RepoCache(tmp.newFolder(), repo, "ghp_test"), api)
+        store.refresh()
+        assertEquals(emptyList<String>(), store.view().projects)
+    }
+
     private companion object {
         const val HTTP_UNAUTHORIZED = 401
         const val HTTP_FORBIDDEN = 403

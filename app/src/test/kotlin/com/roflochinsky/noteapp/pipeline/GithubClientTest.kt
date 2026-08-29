@@ -25,10 +25,14 @@ class GithubClientTest {
             .readText()
 
     private fun client(answer: (String) -> String) =
-        GithubClient(repo, "ghp_v-test-ne-uhodit") { url ->
-            asked += url
-            answer(url)
-        }
+        GithubClient(
+            repo,
+            "ghp_v-test-ne-uhodit",
+            fetch = { url ->
+                asked += url
+                answer(url)
+            },
+        )
 
     @Test
     fun `sha ветки берётся из настоящего ответа git-ref`() {

@@ -70,6 +70,7 @@ class MainActivity : ComponentActivity() {
     private var notes by mutableStateOf(listOf<NotesStore.Note>())
     private var tasks by mutableStateOf(listOf<TaskFile.Task>())
     private var pendingPaths by mutableStateOf(emptySet<String>())
+    private var registry by mutableStateOf(listOf<String>())
     private var revision = ""
     private var notice by mutableStateOf<String?>(null)
     private var newTaskOpen by mutableStateOf(false)
@@ -142,6 +143,7 @@ class MainActivity : ComponentActivity() {
                         BackHandler { screen = Screen.Feed(Tab.NOTES) }
                         TasksScreen(
                             tasks = tasks,
+                            projects = projects(),
                             today = LocalDate.now(),
                             sync = sync,
                             refreshing = refreshing,
@@ -229,7 +231,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun projects(): List<String> = tasks.mapNotNull { it.project }.distinct().sorted()
+    /**
+     * Значения проекта: сперва реестр `projects.md` в его собственном порядке (так он нарисован в
+     * компе), следом — проекты, которые уже стоят в задачах, но в реестр ещё не попали. Задача с
+     * незнакомым проектом иначе выпала бы и из фильтра, и из выбора в деталке.
+     */
+    private fun projects(): List<String> =
+        (registry + tasks.mapNotNull { it.project }.sorted()).distinct()
 
     /**
      * Правка кладётся в журнал очереди прямо здесь: это один маленький файл, зато `id` операции
@@ -267,6 +275,7 @@ class MainActivity : ComponentActivity() {
         revision = fresh.revision
         tasks = fresh.tasks
         pendingPaths = fresh.pending
+        registry = fresh.projects
         fresh.notice?.let { notice = it }
     }
 

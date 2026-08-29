@@ -56,13 +56,29 @@ android {
 
 kotlin { jvmToolchain(17) }
 
-// Вывод смоука (RepoSmokeTest) должен быть виден в консоли гейта — но только его: сплошной
-// showStandardStreams топил эту строку в выводе остальных полусотни тестов.
+// Вывод смоуков (*SmokeTest) должен быть виден в консоли гейта — но только их: сплошной
+// showStandardStreams топил эти строки в выводе остальных полутора сотен тестов.
 tasks.withType<Test>().configureEach {
   testLogging { showStandardStreams = false }
+  // Смоуки включаются переменными окружения, а Gradle их входом не считает: пишущий прогон
+  // получал `FROM-CACHE` и выдавал за свой результат прошлого — `clean` тут не спасает, запись
+  // в кэше живёт дольше выходных файлов (ловушка 7 в docs/harness/epic.md, поймана дважды).
+  // Объявляем переменные входом: без них ключ кэша прежний и гейт быстрый, с ними — новый прогон.
+  val smokeVars = listOf("NOTEAPP_SMOKE_TOKEN", "NOTEAPP_MIGRATE")
+  smokeVars.forEach { name ->
+    inputs.property(name, providers.environmentVariable(name).orNull).optional(true)
+  }
+  // `inputs.property` различает «переменной нет» и «переменная есть», но НЕ различает два
+  // прогона с одним значением: `gh auth token` отдаёт тот же токен, `~/.gradle` общий на все
+  // деревья агентов — и живой прогон приходил `FROM-CACHE` за 600 мс, выдавая чужой результат
+  // за свой. Поэтому со включённым смоуком задача не кэшируется и не бывает up-to-date:
+  // прогон против живого GitHub обязан быть настоящим всегда.
+  val smokeOn = provider { smokeVars.any { providers.environmentVariable(it).orNull != null } }
+  outputs.cacheIf { !smokeOn.get() }
+  outputs.upToDateWhen { !smokeOn.get() }
   addTestOutputListener(
     TestOutputListener { descriptor, event ->
-      if (descriptor.className?.endsWith("RepoSmokeTest") == true) print(event.message)
+      if (descriptor.className?.endsWith("SmokeTest") == true) print(event.message)
     }
   )
 }

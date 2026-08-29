@@ -6,13 +6,19 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertContentDescriptionEquals
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.dp
 import com.roflochinsky.noteapp.pipeline.SyncStatus
 import com.roflochinsky.noteapp.pipeline.TaskFile
@@ -45,21 +51,30 @@ class TasksScreenTest {
     private val sync = mutableStateOf(SyncStatus.OK)
     private var settingsOpened = 0
 
-    private fun task(title: String, status: String = TaskFile.STATUS_OPEN, done: String? = null) =
+    private fun task(
+        title: String,
+        status: String = TaskFile.STATUS_OPEN,
+        done: String? = null,
+        project: String? = null,
+        priority: String = "P2",
+    ) =
         TaskFile.Task(
             path = "tasks/$title.md",
             title = title,
+            priority = priority,
             status = status,
+            project = project,
             created = LocalDate.of(2026, 8, 1),
             done = done?.let(LocalDate::parse),
         )
 
     /** `setContent` рулём зовётся ровно один раз, поэтому статус синка живёт состоянием. */
-    private fun screen(tasks: List<TaskFile.Task>) {
+    private fun screen(tasks: List<TaskFile.Task>, projects: List<String> = emptyList()) {
         compose.setContent {
             DocTheme {
                 TasksScreen(
                     tasks = tasks,
+                    projects = projects,
                     today = today,
                     sync = sync.value,
                     refreshing = false,
@@ -155,9 +170,81 @@ class TasksScreenTest {
             .assertContentDescriptionEquals("Купить хлеб")
     }
 
+    // ── чипы, шторки и поиск (срез Н3) ────────────────────────────────────────────────────
+
+    /** Чип сужает список: выбранное значение остаётся, чужие уходят. */
+    @Test
+    fun `чип проекта сужает список`() {
+        screen(
+            listOf(task("Фикс ретраев", project = "tgsum"), task("Разобрать фото")),
+            projects = listOf("tgsum"),
+        )
+        compose.onNodeWithText("Проект").performClick()
+        // «tgsum» есть и в мете строки задачи — строку шторки отличает счётчик рядом.
+        compose.onNode(hasText("tgsum") and hasText("1")).performClick()
+        compose.onNodeWithText("Фикс ретраев").assertExists()
+        compose.onNodeWithText("Разобрать фото").assertDoesNotExist()
+    }
+
+    /**
+     * Счётчики в шторке — фасетные (вердикт UX): свой чип из расчёта исключён, а значение реестра
+     * без задач остаётся со счётчиком 0 и из шторки не пропадает.
+     */
+    @Test
+    fun `в шторке проекта стоят счётчики, включая ноль у пустого проекта`() {
+        screen(
+            listOf(task("Фикс ретраев", project = "tgsum"), task("Разобрать фото")),
+            projects = listOf("tgsum", "workwatch"),
+        )
+        compose.onNodeWithText("Проект").performClick()
+        compose.onNodeWithText("Все проекты").assertExists()
+        compose.onNodeWithText("workwatch").assertExists()
+        compose.onAllNodesWithText("0").assertCountEquals(1)
+    }
+
+    /**
+     * Пусто под фильтром — не то же, что «задач нет вовсе»: задачи есть, просто не подошли, и выход
+     * из этого состояния должен быть одним тапом.
+     */
+    @Test
+    fun `под фильтром без совпадений экран говорит про фильтр, а не про пустой трекер`() {
+        screen(listOf(task("Фикс ретраев", priority = "P1")), projects = emptyList())
+        compose.onNodeWithText("Приоритет").performClick()
+        compose.onNodeWithText("P3 · низкий").performClick()
+        compose.onNodeWithText(EMPTY).assertDoesNotExist()
+        compose.onNodeWithText(NOTHING).assertExists()
+        compose.onNodeWithText("Сбросить фильтры").performClick()
+        compose.onNodeWithText("Фикс ретраев").assertExists()
+    }
+
+    /** Поиск — лупа в шапке, поле разворачивается на месте вкладок и сужает текущий список. */
+    @Test
+    fun `лупа разворачивает поле поиска и сужает список`() {
+        screen(listOf(task("Фикс ретраев"), task("Разобрать фото")))
+        compose.onNodeWithContentDescription("Поиск").performClick()
+        compose.onNodeWithText("Поиск по задачам").assertExists()
+        compose.onNode(hasSetTextAction()).performTextInput("фото")
+        compose.onNodeWithText("Разобрать фото").assertExists()
+        compose.onNodeWithText("Фикс ретраев").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Закрыть поиск").performClick()
+        compose.onNodeWithText("Фикс ретраев").assertExists()
+    }
+
+    /** Активный чип показывает выбранное значение и снимается своим крестиком (комп, борд 1). */
+    @Test
+    fun `крестик активного чипа сбрасывает фильтр`() {
+        screen(listOf(task("Фикс ретраев", project = "tgsum"), task("Разобрать фото")))
+        compose.onNodeWithText("Проект").performClick()
+        compose.onNodeWithText("Без проекта").performClick()
+        compose.onNodeWithText("Фикс ретраев").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Сбросить Без проекта").performClick()
+        compose.onNodeWithText("Фикс ретраев").assertExists()
+    }
+
     private companion object {
         const val EMPTY = "Задач пока нет"
         const val NO_TOKEN = "нет GitHub-токена — тап, чтобы подключить"
+        const val NOTHING = "Под этот фильтр ничего не подошло"
         val TOUCH = 48.dp
     }
 }
