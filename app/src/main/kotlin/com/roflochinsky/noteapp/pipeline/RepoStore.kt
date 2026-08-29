@@ -262,7 +262,17 @@ class RepoStore(
      */
     private fun vanished(op: WriteQueue.Op): Push {
         forget(op.path, snapshot.commitSha)
-        say("Задачи ${op.path} в GitHub больше нет — правка не применена")
+        say(
+            if (op.edit is Edit.DeleteFile) {
+                // Удаление 404 — это не потеря: цель владельца достигнута. Сюда же приходит
+                // удаление задачи, которая до GitHub не доехала (создание вытеснено из журнала
+                // тем же удалением), — говорить про неё «больше нет» значит врать: её там и не
+                // было (находка Д13).
+                "Задачи ${op.path} в GitHub нет — удалять нечего"
+            } else {
+                "Задачи ${op.path} в GitHub больше нет — правка не применена"
+            }
+        )
         return drop(op)
     }
 

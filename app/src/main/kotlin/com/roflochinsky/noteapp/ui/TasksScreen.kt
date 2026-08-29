@@ -319,13 +319,17 @@ private fun TaskRow(
 /**
  * Визуально 19dp по компу, тач-таргет — 48dp (правило доступности). `toggleable` с ролью — чтобы
  * TalkBack читал «флажок, отмечено», а не безымянную кнопку (вердикт UX про семантику).
+ *
+ * Описание называет ЗАДАЧУ и только её: состояние к нему добавляет сама роль `Checkbox`. Прежнее
+ * «сделана: $title» стояло и на неотмеченном флажке — TalkBack читал его как утверждение, что
+ * задача сделана, то есть врал ровно там, где владелец видеть не может (находка Д11).
  */
 @Composable
 private fun TaskCheckbox(done: Boolean, title: String, onToggle: () -> Unit) {
     Box(
         Modifier.size(TOUCH.dp)
             .toggleable(value = done, role = Role.Checkbox, onValueChange = { onToggle() })
-            .semantics { contentDescription = "сделана: $title" },
+            .semantics { contentDescription = title },
         contentAlignment = Alignment.Center,
     ) {
         Box(

@@ -17,7 +17,6 @@ import org.junit.rules.TemporaryFolder
  * Запись через фасад: оптимистичный overlay, очередь, обновление кэша из ответа записи и штатная
  * ветка 409 (решения LLD-1, LLD-4, LLD-5, LLD-6). Экран про HTTP не знает.
  */
-@Suppress("TooManyFunctions") // тестовый класс — список проверок, а не поверхность класса
 class RepoStoreWriteTest {
 
     @get:Rule val tmp = TemporaryFolder()
@@ -398,6 +397,21 @@ class RepoStoreWriteTest {
         val notice = store.view().notice.orEmpty()
         assertTrue(notice, notice.contains(path))
         assertTrue("сообщение о первом сбое затёрто вторым", notice.contains(second))
+    }
+
+    /** Д13: задачу создали и удалили, не дождавшись сети, — в GitHub её и не было. */
+    @Test
+    fun `удаление несозданной задачи не говорит, что её больше нет`() {
+        val api = api()
+        val store = ready(api)
+        val fresh = store.create("Купить кофе")
+        store.delete(fresh)
+        assertEquals(RepoStore.Push.MORE, store.push())
+        assertEquals(RepoStore.Push.EMPTY, store.push())
+        val notice = store.view().notice.orEmpty()
+        assertTrue(notice, notice.contains("удалять нечего"))
+        assertFalse("её там и не было", notice.contains("больше нет"))
+        assertEquals("лишнего файла в репо не появилось", 1, api.paths().size)
     }
 
     private companion object {

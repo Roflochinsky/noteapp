@@ -8,7 +8,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** Формат задачи — docs/adr/2026-08-26-tasks-as-files.md (единственный источник схемы). */
-@Suppress("TooManyFunctions") // тестовый класс — список проверок, а не поверхность класса
 class TaskFileTest {
 
     /** Как файл лежит в репо заметок (снято с Roflochinsky/voice-notes-test). */

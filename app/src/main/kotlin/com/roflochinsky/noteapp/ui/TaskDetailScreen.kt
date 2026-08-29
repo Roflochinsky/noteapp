@@ -409,6 +409,16 @@ private fun FieldRow(
     }
 }
 
+/**
+ * Строки подзадач — по компу (`.task{padding:8px 0}` ≈ 37px), а не 48dp каждая: на четырёх
+ * подзадачах блок распухал примерно на 50dp (находка Д10).
+ *
+ * ponytail: прозрачной полосы-таргета ([TouchStripe]) здесь НЕТ, в отличие от чипов и сегмента, и
+ * это не забывчивость. Полосы соседних строк легли бы внахлёст (строки идут вплотную), а в нахлёсте
+ * побеждает та, что нарисована позже, — тап по нижнему краю строки переключал бы СЛЕДУЮЩУЮ
+ * подзадачу. Молча переключить не ту — хуже, чем таргет в 37dp: строка кликабельна во всю ширину
+ * экрана, и промахнуться мимо неё некуда, промах бывает только между соседями.
+ */
 @Composable
 private fun Subtasks(task: TaskFile.Task, onEdit: (Edit) -> Unit, onAdd: () -> Unit) {
     Column(Modifier.padding(horizontal = 22.dp)) {
@@ -427,7 +437,7 @@ private fun Subtasks(task: TaskFile.Task, onEdit: (Edit) -> Unit, onAdd: () -> U
                             role = Role.Checkbox,
                             onValueChange = { onEdit(Edit.ToggleSubtask(sub.text, it)) },
                         )
-                        .height(TOUCH.dp),
+                        .padding(vertical = SUB_PAD.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -447,7 +457,8 @@ private fun Subtasks(task: TaskFile.Task, onEdit: (Edit) -> Unit, onAdd: () -> U
             }
         }
         Row(
-            modifier = Modifier.fillMaxWidth().clickable(onClick = onAdd).height(TOUCH.dp),
+            modifier =
+                Modifier.fillMaxWidth().clickable(onClick = onAdd).padding(vertical = SUB_PAD.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -641,6 +652,9 @@ internal fun tagsValue(tags: List<String>): String? =
         .distinct()
         .takeIf { it.isNotEmpty() }
         ?.let { "[${it.joinToString(", ")}]" }
+
+/** Отступ строки подзадачи по компу: `.task{padding:8px 0}`. */
+private const val SUB_PAD = 8
 
 /** Высота сегмента статуса по компу: `.seg button{padding:10px 4px}` ≈ 38px. */
 private const val SEG = 38
