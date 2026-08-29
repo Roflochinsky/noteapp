@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Гейт приложения. Агенты зовут ЭТО, а не gradlew напрямую.
+#
+# ГЛАВНОЕ — `--offline`. Замер 2026-08-29: конфигурация сборки шла **280 секунд**, из них
+# 279 — молчаливое ожидание таймаутов сети при разрешении зависимостей (тот же обрыв до
+# внешних хостов из WSL, что ловили с GitHub). С `--offline` — 1 секунда, полный гейт с
+# APK — 19 секунд вместо пяти минут. Все зависимости давно лежат в `~/.gradle/caches`.
+# Нужен реальный поход в сеть (сменили версию зависимости) — `bin/gate --online <задачи>`.
+#
+# Очередь на один прогон (flock): один прогон — это Gradle-демон (2 ГБ) плюс Kotlin-демон
+# (1,5 ГБ), а машина 11 ГБ. Двое разом уводят систему в своп. Второй вызов просто ждёт.
+#
+#   bin/gate            быстрый набор: ktfmtCheck detekt testDebugUnitTest
+#   bin/gate --full     полный: + lint + assembleDebug (перед сдачей среза)
+#   bin/gate <задачи>   свои задачи Gradle
+#   bin/gate --online … то же, но с сетью (медленно, пока сеть рвётся)
+#
+# Попутно снимает грабли: JAVA_HOME (java нет в PATH) и local.properties (не в git, в
+# свежем worktree его нет). И запрещает --rerun-tasks — он тянет полную перекомпиляцию.
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+lock="${TMPDIR:-/tmp}/noteapp-gate.lock"
+net=(--offline)
+
+while [[ ${1:-} == --* ]]; do
+  case "$1" in
+    --online) net=(); shift ;;
+    --full)   tasks=(ktfmtCheck detekt lint testDebugUnitTest assembleDebug); shift ;;
+    --rerun-tasks) echo "gate: --rerun-tasks запрещён — тянет полную перекомпиляцию. Проси конкретную задачу." >&2; exit 2 ;;
+    *) break ;;
+  esac
+done
+[[ -n ${tasks+x} ]] || tasks=("${@:-}")
+[[ -n ${tasks[0]:-} ]] || tasks=(ktfmtCheck detekt testDebugUnitTest)
+
+[[ -f "$root/local.properties" ]] || cp ~/code/noteapp/local.properties "$root/local.properties"
+
+exec 9>"$lock"
+flock -n 9 || { echo "gate: другой прогон уже идёт, жду очереди (это нормально, не убивай)…" >&2; flock 9; }
+
+echo "gate: ${net[*]} ${tasks[*]}"
+JAVA_HOME=~/.local/java/jdk17 "$root/gradlew" -p "$root" "${net[@]}" --max-workers=4 "${tasks[@]}"
