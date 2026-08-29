@@ -44,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
@@ -397,21 +398,18 @@ fun NewTaskSheet(
  * создания состоит из одних чипов и вырастал весь, а при переносе — вдвое. Недостающие 8,5dp сверху
  * и снизу добирает near-hit Compose (см. [TOUCH]); заодно тап в зазор `spacedBy` достаётся
  * БЛИЖАЙШЕМУ чипу, а не тому, что нарисован позже.
+ *
+ * `clip` стоит до `clickable`, иначе рипл заливается прямоугольником поверх скругления 9dp.
  */
 @Composable
 private fun Chip(label: String, on: Boolean, chevron: Boolean = false, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(9.dp)
     Row(
         modifier =
-            Modifier.clickable(onClick = onClick)
-                .border(
-                    1.dp,
-                    if (on) DocPalette.Blue else DocPalette.Line,
-                    RoundedCornerShape(9.dp),
-                )
-                .background(
-                    if (on) DocPalette.BlueSoft else DocPalette.Paper,
-                    RoundedCornerShape(9.dp),
-                )
+            Modifier.clip(shape)
+                .clickable(onClick = onClick)
+                .border(1.dp, if (on) DocPalette.Blue else DocPalette.Line, shape)
+                .background(if (on) DocPalette.BlueSoft else DocPalette.Paper, shape)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
