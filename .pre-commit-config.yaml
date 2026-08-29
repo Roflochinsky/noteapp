@@ -13,7 +13,7 @@ repos:
   # Kotlin-формат намеренно НЕ здесь: единственный форматтер — Gradle ktfmtCheck (гейт из
   # CLAUDE.md). Двойник в pre-commit — это война версий из прецедента workwatch.
   - repo: https://github.com/rhysd/actionlint
-    rev: v1.7.7
+    rev: v1.7.12
     hooks:
       # Своих workflow у этого репо нет — единственный workflow-файл здесь эталон для РЕПО
       # ЗАМЕТОК, и без явного files хук молча не срабатывал бы ни разу.
