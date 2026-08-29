@@ -52,6 +52,7 @@ class PushWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                         path = path,
                         content = md,
                         message = "Заметка ${RawNote.fileName(noteId)}",
+                        sha = null,
                     )
                 File(dir, NotesStore.PUSHED).writeText(path)
                 Log.i(Probe.LOG_TAG, "PROBE:PUSH_OK note=$noteId path=$path")

@@ -11,6 +11,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -31,6 +32,7 @@ import com.roflochinsky.noteapp.pipeline.GithubClient
 import com.roflochinsky.noteapp.pipeline.NotesStore
 import com.roflochinsky.noteapp.pipeline.RepoCache
 import com.roflochinsky.noteapp.pipeline.RepoStore
+import com.roflochinsky.noteapp.pipeline.RepoWriteWorker
 import com.roflochinsky.noteapp.pipeline.Settings
 import com.roflochinsky.noteapp.pipeline.SyncStatus
 import com.roflochinsky.noteapp.pipeline.TaskFile
@@ -39,7 +41,9 @@ import com.roflochinsky.noteapp.ui.DocTheme
 import com.roflochinsky.noteapp.ui.FeedScreen
 import com.roflochinsky.noteapp.ui.OnboardStep
 import com.roflochinsky.noteapp.ui.OnboardingScreen
+import com.roflochinsky.noteapp.ui.NewTaskSheet
 import com.roflochinsky.noteapp.ui.RecordSheet
+import com.roflochinsky.noteapp.ui.TaskDetailScreen
 import com.roflochinsky.noteapp.ui.Tab
 import com.roflochinsky.noteapp.ui.TasksScreen
 import java.time.LocalDate
@@ -57,11 +61,18 @@ class MainActivity : ComponentActivity() {
         data class Feed(val tab: Tab = Tab.NOTES) : Screen
 
         data class Detail(val noteId: String) : Screen
+
+        data class Task(val path: String) : Screen
     }
 
     private var screen by mutableStateOf<Screen>(Screen.Feed())
     private var notes by mutableStateOf(listOf<NotesStore.Note>())
     private var tasks by mutableStateOf(listOf<TaskFile.Task>())
+    private var pendingPaths by mutableStateOf(emptySet<String>())
+    private var notice by mutableStateOf<String?>(null)
+    private var newTaskOpen by mutableStateOf(false)
+    private var store: RepoStore? = null
+    private var watching = false
     private var sync by mutableStateOf(SyncStatus.OK)
     private var refreshing by mutableStateOf(false)
     private var recording by mutableStateOf(false)
@@ -132,16 +143,60 @@ class MainActivity : ComponentActivity() {
                             sync = sync,
                             refreshing = refreshing,
                             isRecording = recording,
+                            notice = notice,
+                            pending = { it in pendingPaths },
                             onTab = { screen = Screen.Feed(it) },
                             onRefresh = { scope.launch { refreshRepo() } },
                             onRecord = ::onRecord,
                             onSettings = { screen = Screen.Onboarding },
+                            onTask = { screen = Screen.Task(it) },
+                            onNewTask = { newTaskOpen = true },
+                            onToggle = { task -> toggle(scope, task) },
+                            onCancel = { id -> after(scope) { it.cancel(id) } },
+                            onFlush = { RepoWriteWorker.schedule(this@MainActivity) },
+                            onNotice = { notice = null },
                         )
                     }
                 }
             is Screen.Detail -> {
                 BackHandler { screen = Screen.Feed() }
                 DetailScreen(noteId = s.noteId, onBack = { screen = Screen.Feed() })
+            }
+            is Screen.Task -> {
+                val back = { screen = Screen.Feed(Tab.TASKS) }
+                BackHandler { back() }
+                val task = tasks.firstOrNull { it.path == s.path }
+                if (task == null) {
+                    back()
+                } else {
+                    TaskDetailScreen(
+                        task = task,
+                        projects = projects(),
+                        pending = s.path in pendingPaths,
+                        today = LocalDate.now(),
+                        onEdit = { edit -> write(scope) { it.edit(s.path, edit) } },
+                        onStatus = { status -> write(scope) { it.setStatus(s.path, status) } },
+                        onDelete = {
+                            write(scope) { it.delete(s.path) }
+                            back()
+                        },
+                        onOpen = ::openInGithub,
+                        onBack = back,
+                    )
+                }
+            }
+        }
+        if (newTaskOpen) {
+            NewTaskSheet(
+                projects = projects(),
+                today = LocalDate.now(),
+                taken = tasks.map { it.path }.toSet(),
+                onDismiss = { newTaskOpen = false },
+            ) { draft ->
+                newTaskOpen = false
+                write(scope) {
+                    it.create(draft.title, draft.project, draft.priority, draft.due, draft.tags)
+                }
             }
         }
         if (screen is Screen.Onboarding && setupComplete()) {
@@ -167,6 +222,74 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun projects(): List<String> =
+        tasks.mapNotNull { it.project }.distinct().sorted()
+
+    /**
+     * Правка кладётся в журнал очереди прямо здесь: это один маленький файл, зато `id` операции
+     * нужен снекбару отмены сразу. Тяжёлое (пересбор списка из кэша) уходит на IO.
+     */
+    private fun toggle(scope: kotlinx.coroutines.CoroutineScope, task: TaskFile.Task): String {
+        val store = store ?: return ""
+        val status = if (task.isDone) TaskFile.STATUS_OPEN else TaskFile.STATUS_DONE
+        val id = store.setStatus(task.path, status)
+        scope.launch { reload() }
+        return id
+    }
+
+    private fun write(scope: kotlinx.coroutines.CoroutineScope, action: (RepoStore) -> Unit) {
+        after(scope, action)
+        RepoWriteWorker.schedule(this)
+    }
+
+    private fun after(scope: kotlinx.coroutines.CoroutineScope, action: (RepoStore) -> Unit) {
+        val store = store ?: return
+        scope.launch {
+            withContext(Dispatchers.IO) { action(store) }
+            reload()
+        }
+    }
+
+    /** Список и «в очереди» пересчитываются из кэша и журнала — вне главного потока. */
+    private suspend fun reload() {
+        val store = store ?: return
+        val fresh =
+            withContext(Dispatchers.IO) {
+                Triple(store.tasks(), store.pendingPaths(), store.takeDivergence())
+            }
+        tasks = fresh.first
+        pendingPaths = fresh.second
+        fresh.third?.let { notice = it }
+        watchQueue()
+    }
+
+    /** Пока очередь не пуста — тикаем раз в секунду, чтобы янтарь сменился зеленью сам. */
+    private fun watchQueue() {
+        if (watching || pendingPaths.isEmpty()) return
+        watching = true
+        lifecycleScope.launch {
+            while (pendingPaths.isNotEmpty()) {
+                delay(POLL_MS)
+                val store = store ?: break
+                val fresh =
+                    withContext(Dispatchers.IO) {
+                        Triple(store.tasks(), store.pendingPaths(), store.takeDivergence())
+                    }
+                tasks = fresh.first
+                pendingPaths = fresh.second
+                fresh.third?.let { notice = it }
+            }
+            watching = false
+        }
+    }
+
+    private fun openInGithub(path: String) {
+        val url =
+            "https://github.com/${Settings.githubRepo(this)}/blob/main/" +
+                path.split("/").joinToString("/") { android.net.Uri.encode(it) }
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))) }
+    }
+
     private fun onRecord() {
         if (recording) sheetOpen = true
         else startForegroundService(RecordingService.toggleIntent(this))
@@ -176,7 +299,7 @@ class MainActivity : ComponentActivity() {
     private suspend fun refreshRepo() {
         val repo = Settings.githubRepo(this)
         val token = Settings.githubToken(this)
-        val store =
+        val fresh =
             withContext(Dispatchers.IO) {
                 RepoStore(
                     repo = repo,
@@ -184,11 +307,14 @@ class MainActivity : ComponentActivity() {
                     api = token?.let { GithubClient(repo, it) },
                 )
             }
-        tasks = store.tasks()
+        store = fresh
+        reload()
         refreshing = true
-        sync = withContext(Dispatchers.IO) { store.refresh() }
-        tasks = store.tasks()
+        sync = withContext(Dispatchers.IO) { fresh.refresh() }
+        reload()
         refreshing = false
+        // Правки, пережившие перезапуск, доводит тот же воркер — их никто не потерял.
+        if (pendingPaths.isNotEmpty()) RepoWriteWorker.schedule(this)
     }
 
     private fun sendAction(action: String) {

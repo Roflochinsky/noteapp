@@ -39,7 +39,7 @@ class RepoSmokeTest {
         println("  Сделано за месяц · ${TaskFilter.doneCount(tasks, today)}:")
         TaskFilter.done(tasks, today).forEach { println("    ${line(it, today)}") }
         val note = GithubClient(repo, token).readFile("встречи/2026-08-24-1807-reliz-tgsum.md")
-        println("  заметка (кириллица в пути): ${NoteFile.parse("", note)?.title}")
+        println("  заметка (кириллица в пути): ${NoteFile.parse("", note.text)?.title}")
     }
 
     private fun line(task: TaskFile.Task, today: LocalDate): String = buildString {

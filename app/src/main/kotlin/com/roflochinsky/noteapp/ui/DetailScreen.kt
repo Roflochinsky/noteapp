@@ -92,7 +92,7 @@ fun DetailScreen(noteId: String, onBack: () -> Unit) {
                     if (path == null) {
                         doneState = "саммари готовится…"
                     } else {
-                        done = DoneNoteParser.parse(github.readFile(path))
+                        done = DoneNoteParser.parse(github.readFile(path).text)
                         if (done == null) doneState = "саммари готовится…"
                     }
                 }

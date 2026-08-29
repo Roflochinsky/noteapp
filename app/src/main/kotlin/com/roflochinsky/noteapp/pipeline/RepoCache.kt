@@ -8,7 +8,7 @@ import org.json.JSONObject
  * (решение LLD-13). Один json, запись через temp+rename. Битый файл, чужая версия или смена репо —
  * холодный старт, а не исключение: кэш всегда восстановим из репо.
  */
-class RepoCache(private val dir: File) {
+class RepoCache(val dir: File) {
 
     data class Entry(val sha: String, val text: String)
 

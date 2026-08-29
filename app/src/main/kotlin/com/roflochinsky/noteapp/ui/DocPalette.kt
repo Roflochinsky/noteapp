@@ -24,6 +24,9 @@ object DocPalette {
     val Green = Color(0xFF2E7D53)
     val Nav = Color(0xFF243B63)
     val OnNav = Color(0xFFF4F7FB)
+
+    /** Деструктивное действие — нативный красный Android; коралл остаётся только за записью. */
+    val Err = Color(0xFFB3261E)
 }
 
 private val scheme =
@@ -36,7 +39,7 @@ private val scheme =
         onBackground = DocPalette.Ink,
         onSurface = DocPalette.Ink,
         outline = DocPalette.Line,
-        error = DocPalette.Rec,
+        error = DocPalette.Err,
     )
 
 // Roboto — системный шрифт Android (пин владельца); mono — для цифр.

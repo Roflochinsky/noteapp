@@ -4,7 +4,7 @@ import java.io.IOException
 
 /**
  * Порт GitHub-API (решение LLD-3): в тестах — фейк на картах в памяти, в приложении —
- * [GithubClient]. В срезе Н1 нужно только чтение; запись и `compare` придут срезами Н2 и Н7.
+ * [GithubClient]. Срез Н1 дал чтение, Н2 — запись одного файла; `compare` придёт срезом Н7.
  */
 interface GithubApi {
     /** SHA коммита, на который смотрит ветка по умолчанию. */
@@ -15,8 +15,21 @@ interface GithubApi {
 
     @Throws(IOException::class) fun readBlob(sha: String): String
 
-    @Throws(IOException::class) fun readFile(path: String): String
+    /** Текст и свежий blob-SHA одним запросом — то, что нужно на 409 (research §7.4). */
+    @Throws(IOException::class) fun readFile(path: String): RepoCache.Entry
+
+    /**
+     * `sha` обязателен при обновлении и запрещён при создании: PUT без sha по существующему пути
+     * даёт 422, а не воскресший дубль (решение LLD-8).
+     */
+    @Throws(IOException::class)
+    fun putFile(path: String, content: String, message: String, sha: String?): Written
+
+    @Throws(IOException::class) fun deleteFile(path: String, message: String, sha: String): Written
 }
+
+/** Ответ записи: свежий blob-SHA файла (у удаления его нет) и SHA коммита (research §7.1). */
+data class Written(val sha: String?, val commitSha: String)
 
 /** Не-2xx от GitHub: код различает штатные ветки (409/422/403), тело — только для лога. */
 class GithubHttpException(val code: Int, message: String) : IOException(message)
