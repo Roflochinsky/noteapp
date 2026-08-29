@@ -13,13 +13,43 @@ import org.json.JSONObject
  * иначе данные, прочитанные отозванным токеном, остаются на экране (решение LLD-23). Сам токен в
  * файл не пишется, только его отпечаток.
  */
-class RepoCache(private val dir: File, private val repo: String, token: String?) {
+class RepoCache(val dir: File, private val repo: String, token: String?) {
 
     private val tokenHash = fingerprint(token)
 
     data class Entry(val sha: String, val text: String)
 
     data class Snapshot(val commitSha: String = "", val files: Map<String, Entry> = emptyMap())
+
+    private var memo: Snapshot? = null
+    private var seen = ""
+
+    /**
+     * Снимок с диска, перечитанный только если файл изменился. Читать в конструктор один раз
+     * нельзя: воркер записи отправил правку, убрал её из журнала, а экран остался со старым текстом
+     * — галочка отскакивает (решение LLD-5).
+     *
+     * `@Synchronized` — потому что `memo` и `seen` пишет [save] с потока воркера, а читает экран:
+     * без замка порядок этих двух присваиваний ничем не связан, и читатель может увидеть новую
+     * метку при старом снимке, то есть застрять на устаревшем тексте.
+     *
+     * ponytail: метка — время и размер файла, не счётчик версий внутри json. Потолок: две записи в
+     * одну миллисекунду одинаковой длины экран пропустит до следующего тика; если такое всплывёт —
+     * в json кладётся счётчик и сравнивается он.
+     */
+    @Synchronized
+    fun snapshot(): Snapshot {
+        val now = stamp()
+        val memo = memo
+        if (memo != null && now == seen) return memo
+        return load().also {
+            this.memo = it
+            seen = now
+        }
+    }
+
+    /** Дешёвая метка состояния кэша: не изменилась — пересобирать список не из чего. */
+    fun stamp(): String = file().let { "${it.lastModified()}:${it.length()}" }
 
     fun load(): Snapshot =
         runCatching {
@@ -43,6 +73,7 @@ class RepoCache(private val dir: File, private val repo: String, token: String?)
             }
             .getOrDefault(Snapshot())
 
+    @Synchronized
     fun save(snapshot: Snapshot) {
         val files = JSONObject()
         snapshot.files.forEach { (path, e) ->
@@ -62,6 +93,8 @@ class RepoCache(private val dir: File, private val repo: String, token: String?)
             file().writeText(tmp.readText())
             tmp.delete()
         }
+        memo = snapshot
+        seen = stamp()
     }
 
     private fun file() = File(dir, NAME)

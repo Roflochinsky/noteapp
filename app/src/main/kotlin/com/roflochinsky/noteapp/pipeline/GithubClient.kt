@@ -38,35 +38,47 @@ class GithubClient(
     override fun readBlob(sha: String): String =
         decode(JSONObject(fetch("$API/$repo/git/blobs/$sha")).getString("content"))
 
-    override fun readFile(path: String): String =
-        decode(JSONObject(fetch("$API/$repo/contents/${encodePath(path)}")).getString("content"))
+    override fun readFile(path: String): RepoCache.Entry {
+        val json = JSONObject(fetch("$API/$repo/contents/${encodePath(path)}"))
+        return RepoCache.Entry(json.getString("sha"), decode(json.getString("content")))
+    }
 
-    /** Один PUT — один новый файл (1 коммит = 1 заметка). */
+    /** Один PUT — один коммит. Без `sha` — только создание нового файла (решение LLD-8). */
+    override fun putFile(path: String, content: String, message: String, sha: String?): Written {
+        val body =
+            JSONObject()
+                .put("message", message)
+                .put("content", Base64.getEncoder().encodeToString(content.toByteArray()))
+        sha?.let { body.put("sha", it) }
+        return written(send("PUT", path, body))
+    }
+
+    override fun deleteFile(path: String, message: String, sha: String): Written =
+        written(send("DELETE", path, JSONObject().put("message", message).put("sha", sha)))
+
+    private fun written(response: String): Written {
+        val json = JSONObject(response)
+        return Written(
+            sha = json.optJSONObject("content")?.optString("sha")?.takeIf { it.isNotEmpty() },
+            commitSha = json.getJSONObject("commit").getString("sha"),
+        )
+    }
+
+    /** Мутации идут мимо шва [fetch]: он читающий, а тело ответа записи нужно целиком. */
     @Throws(IOException::class)
-    fun putFile(path: String, content: String, message: String) {
+    private fun send(method: String, path: String, body: JSONObject): String {
         val conn = open("$API/$repo/contents/${encodePath(path)}", token)
         try {
-            conn.requestMethod = "PUT"
+            conn.requestMethod = method
             conn.doOutput = true
             conn.setRequestProperty("Content-Type", "application/json")
-            val body =
-                JSONObject()
-                    .put("message", message)
-                    .put("content", Base64.getEncoder().encodeToString(content.toByteArray()))
-                    .toString()
-            conn.outputStream.use { it.write(body.toByteArray()) }
+            conn.outputStream.use { it.write(body.toString().toByteArray()) }
             check(conn)
+            return conn.inputStream.bufferedReader().readText()
         } finally {
             conn.disconnect()
         }
     }
-
-    /** Ищет обработанный файл по префиксу имени (Action добавил слаг) — контракт HLD-1 v1. */
-    @Throws(IOException::class)
-    fun findDonePath(fileBase: String): String? =
-        readTree("main").keys.firstOrNull {
-            !it.startsWith("inbox/") && it.substringAfterLast('/').startsWith(fileBase)
-        }
 
     /** Ответы GitHub приходят с переносами строк; кодировка задана явно — в репо кириллица. */
     private fun decode(base64: String): String =

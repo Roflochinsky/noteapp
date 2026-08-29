@@ -110,9 +110,40 @@ class ActionFixtureTest {
         assertTrue(bare.subtasks.isEmpty())
     }
 
+    /**
+     * «Секция „Транскрипт“ переносится из raw как есть, вместе с пустой строкой после заголовка:
+     * Action транскрипт не переписывает» (спека формата). Сверка идёт по тексту файлов, а не через
+     * [NoteFile.Note.section]: парсер съел бы пустую строку одинаково в обеих половинах, и сверка
+     * прошла бы на файлах, где её уже нет.
+     */
+    @Test
+    fun `транскрипт done-заметки — байт в байт транскрипт raw`() {
+        for ((raw, done) in RAW_TO_DONE) {
+            val fromRaw = transcript(ActionFixture.text(raw))
+            assertEquals(raw, fromRaw, transcript(ActionFixture.text(done)))
+            assertTrue(fromRaw, fromRaw.startsWith("$TRANSCRIPT\n\n"))
+        }
+    }
+
+    /** Хвост файла от заголовка: «Транскрипт» — последняя секция и в raw, и в done. */
+    private fun transcript(md: String): String {
+        val at = md.indexOf(TRANSCRIPT)
+        // Без проверки пропавшая секция дала бы StringIndexOutOfBoundsException вместо диагноза.
+        require(at >= 0) { "в фикстуре нет секции $TRANSCRIPT" }
+        return md.substring(at)
+    }
+
     private fun task(name: String) = TaskFile.parse(TaskFile.DIR + name, ActionFixture.text(name))
 
     private companion object {
         const val BARE = "2026-08-26-kupit-kabel.md"
+        const val TRANSCRIPT = "## Транскрипт"
+
+        /** Половины эталонной пары: вход от телефона → результат Action. */
+        val RAW_TO_DONE =
+            listOf(
+                "note-raw-with-tasks.md" to "note-done-with-tasks.md",
+                "note-raw-no-tasks.md" to "note-done-no-tasks.md",
+            )
     }
 }

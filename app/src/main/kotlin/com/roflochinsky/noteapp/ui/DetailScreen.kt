@@ -54,6 +54,7 @@ import com.roflochinsky.noteapp.pipeline.NotesStore
 import com.roflochinsky.noteapp.pipeline.RawNote
 import com.roflochinsky.noteapp.pipeline.Settings
 import com.roflochinsky.noteapp.pipeline.TranscriptMapper
+import com.roflochinsky.noteapp.pipeline.findDonePath
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -95,7 +96,7 @@ fun DetailScreen(noteId: String, onBack: () -> Unit) {
                     if (path == null) {
                         doneState = "саммари готовится…"
                     } else {
-                        done = DoneNoteParser.parse(github.readFile(path))
+                        done = DoneNoteParser.parse(github.readFile(path).text)
                         if (done == null) doneState = "саммари готовится…"
                     }
                 }

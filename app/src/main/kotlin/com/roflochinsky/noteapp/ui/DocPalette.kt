@@ -10,6 +10,29 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
+/**
+ * Минимальная сторона тач-таргета в dp (правило доступности). Растягивать до неё ВИДИМЫЙ элемент не
+ * нужно и вредно — комп задаёт чип 31dp, сегмент 38dp, строку подзадачи 37dp: промах в пределах
+ * 48dp Compose засчитывает сам (`NodeCoordinator.hitTest` → `hitNear`, радиус
+ * `ViewConfiguration.minimumTouchTargetSize` = 48×48dp, дефолт интерфейса,
+ * `AndroidViewConfiguration` его не переопределяет). Константа остаётся для мест, где 48dp — это
+ * ИМЕННО высота по компу.
+ *
+ * Проверено байткодом ui 1.7.6 и material3 1.3.1 (`javap -p -c` по распакованным `ui-release.aar` /
+ * `material3-release.aar` из `~/.gradle/caches`), чтобы следующий не переспрашивал:
+ * - спор двух соседей решается РАССТОЯНИЕМ: `HitTestResult.isHitInMinimumTouchTargetBetter` берёт
+ *   новый near-hit, только если он строго ближе (`DistanceAndInLayer.compareTo`: сперва «внутри
+ *   слоя», потом `signum(distance)`); порядок отрисовки решает лишь ничью;
+ * - НАСТОЯЩЕЕ попадание (`hit`, расстояние `-1f`) всегда перебивает любой near-hit соседа — поэтому
+ *   у идущих вплотную кликабельных строк (подзадачи) промаха на соседа не бывает;
+ * - near-hit не opt-in: он у любого `PointerInputModifierNode`, `clickable` ничего не включает.
+ *   Единственное условие — палец (`PointerType.Touch`); для мыши и стилуса near-hit выключен;
+ * - `Modifier.minimumInteractiveComponentSize()` нам не годится: он берёт `max(placeable.height,
+ *   48dp)` и отдаёт это в `layout()`, то есть двигает РАЗМЕТКУ и соседей;
+ * - клипящий предок (`clip`, `Surface`, `Card`) размером ≥48×48 near-hit наружу себя обнуляет.
+ */
+internal const val TOUCH = 48
+
 /** Мир «Документ» (комп nikitatrubaev-pdj.4): холодная бумага, найви, синий; коралл только REC. */
 object DocPalette {
     val Paper = Color(0xFFFBFBF9)
@@ -24,6 +47,15 @@ object DocPalette {
     val Green = Color(0xFF2E7D53)
     val Nav = Color(0xFF243B63)
     val OnNav = Color(0xFFF4F7FB)
+
+    /** Подложка активного: синий 10% — токен `blue-soft` из DESIGN.md. */
+    val BlueSoft = Color(0x1A3A6FB8)
+
+    /** Деструктивное действие — нативный красный Android; коралл остаётся только за записью. */
+    val Err = Color(0xFFB3261E)
+
+    /** Обводка деструктивной кнопки: тот же красный 20%. */
+    val ErrLine = Color(0x33B3261E)
 }
 
 private val scheme =
@@ -36,7 +68,7 @@ private val scheme =
         onBackground = DocPalette.Ink,
         onSurface = DocPalette.Ink,
         outline = DocPalette.Line,
-        error = DocPalette.Rec,
+        error = DocPalette.Err,
     )
 
 // Roboto — системный шрифт Android (пин владельца); mono — для цифр.

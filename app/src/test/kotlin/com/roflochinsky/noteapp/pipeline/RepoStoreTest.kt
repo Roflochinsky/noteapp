@@ -52,7 +52,7 @@ class RepoStoreTest {
     fun `обновление приносит задачи из репо`() {
         val store = store(tmp.newFolder(), api())
         assertEquals(SyncStatus.OK, store.refresh())
-        val titles = store.tasks().map { it.title }.sorted()
+        val titles = store.view().tasks.map { it.title }.sorted()
         assertEquals(listOf("Разобрать фото с похода", "Фикс ретраев очереди"), titles)
     }
 
@@ -61,9 +61,9 @@ class RepoStoreTest {
         val dir = tmp.newFolder()
         store(dir, api()).refresh()
         val cold = store(dir, null)
-        assertEquals(2, cold.tasks().size)
+        assertEquals(2, cold.view().tasks.size)
         assertEquals(SyncStatus.NO_TOKEN, cold.refresh())
-        assertEquals(2, cold.tasks().size)
+        assertEquals(2, cold.view().tasks.size)
     }
 
     @Test
@@ -87,7 +87,7 @@ class RepoStoreTest {
         api.put("tasks/2026-08-25-fix-retraev-ocheredi.md", fix.replace("P1", "P3"))
         api.remove("tasks/2026-08-20-razobrat-foto.md")
         store.refresh()
-        assertEquals(listOf("P3"), store.tasks().map { it.priority })
+        assertEquals(listOf("P3"), store.view().tasks.map { it.priority })
     }
 
     @Test
@@ -98,7 +98,7 @@ class RepoStoreTest {
         store.refresh()
         api.fail = UnknownHostException("api.github.com")
         assertEquals(SyncStatus.OFFLINE, store.refresh())
-        assertEquals(2, store.tasks().size)
+        assertEquals(2, store.view().tasks.size)
     }
 
     @Test

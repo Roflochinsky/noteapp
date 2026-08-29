@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -62,12 +62,16 @@ fun FeedScreen(
                             modifier = Modifier.padding(start = 22.dp, top = 18.dp, bottom = 4.dp),
                         )
                     }
-                    items(dayNotes, key = { it.id }) { note ->
+                    itemsIndexed(dayNotes, key = { _, note -> note.id }) { i, note ->
+                        // Комп: `.doc-item + .doc-item{border-top}` — линия висит на самой строке
+                        // с её паддингом, то есть идёт от края до края, и только между соседями:
+                        // под последней записью дня и над рубрикой следующего её нет. Так же
+                        // разделены строки задач; `DESIGN.md` требует «full-bleed строки,
+                        // разделённые hairline 1px».
+                        if (i > 0) {
+                            HorizontalDivider(color = DocPalette.Line)
+                        }
                         NoteItem(note, onClick = { onNote(note.id) })
-                        HorizontalDivider(
-                            color = DocPalette.Line,
-                            modifier = Modifier.padding(horizontal = 22.dp),
-                        )
                     }
                 }
             }
