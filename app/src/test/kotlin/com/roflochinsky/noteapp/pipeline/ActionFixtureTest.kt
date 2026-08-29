@@ -126,7 +126,12 @@ class ActionFixtureTest {
     }
 
     /** Хвост файла от заголовка: «Транскрипт» — последняя секция и в raw, и в done. */
-    private fun transcript(md: String) = md.substring(md.indexOf(TRANSCRIPT))
+    private fun transcript(md: String): String {
+        val at = md.indexOf(TRANSCRIPT)
+        // Без проверки пропавшая секция дала бы StringIndexOutOfBoundsException вместо диагноза.
+        require(at >= 0) { "в фикстуре нет секции $TRANSCRIPT" }
+        return md.substring(at)
+    }
 
     private fun task(name: String) = TaskFile.parse(TaskFile.DIR + name, ActionFixture.text(name))
 
