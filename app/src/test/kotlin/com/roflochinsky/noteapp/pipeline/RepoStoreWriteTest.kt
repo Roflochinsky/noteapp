@@ -293,6 +293,23 @@ class RepoStoreWriteTest {
     }
 
     /**
+     * «ОТМЕНИТЬ» нажата, пока PUT уже в полёте: снять операцию нечем — коммит доедет. Молча убрать
+     * запись журнала значило бы соврать («отменено», а в GitHub правка есть). Владельцу говорим той
+     * же плашкой, которой воркер сообщает о снятых правках.
+     */
+    @Test
+    fun `отмена во время отправки не молчит — правка ушла, и владелец это видит`() {
+        val api = api()
+        val store = ready(api)
+        val id = store.setStatus(path, TaskFile.STATUS_DONE)
+        api.onWrite = { store.cancel(id) }
+        assertEquals(RepoStore.Push.MORE, store.push())
+        assertTrue("коммит доехал", api.text(path)!!.contains("status: done"))
+        val notice = store.view().notice.orEmpty()
+        assertTrue("владелец должен узнать, что отмена не успела: $notice", "отменить" in notice)
+    }
+
+    /**
      * Что раньше проверяли на собранной задаче `ConflictRule.Merged`, теперь проверяется там, где
      * это действительно происходит: правка переигрывается поверх свежего текста из git.
      */
@@ -436,6 +453,24 @@ class RepoStoreWriteTest {
             "",
             RepoCache(dir, repo, "token").load().commitSha,
         )
+    }
+
+    /**
+     * Владелец сменил токен в настройках, пока воркер тянет очередь: экран уже получил новый фасад
+     * ([RepoStore.shared] пересобрал его по новому ключу), а воркер до конца `doWork()` держит
+     * свой, локальный. Это ровно два фасада над одним кэшем — гонка Б1 узким окном. Старый фасад
+     * отправку не продолжает, и отозванным токеном в GitHub не пишет.
+     */
+    @Test
+    fun `сменили токен — старый фасад отправку не продолжает`() {
+        val dir = tmp.newFolder()
+        val api = api()
+        val worker = RepoStore.shared(dir, repo, "token", api)
+        worker.refresh()
+        worker.setStatus(path, TaskFile.STATUS_DONE)
+        RepoStore.shared(dir, repo, "other", api)
+        assertEquals(RepoStore.Push.RETRY, worker.push())
+        assertEquals("отозванным токеном в GitHub не пишем", 0, api.writeCalls)
     }
 
     /** Один фасад на процесс: второй экземпляр над тем же кэшем — это и есть гонка Б1. */
