@@ -19,6 +19,26 @@ object TaskFilter {
     val STATUSES = listOf(TaskFile.STATUS_OPEN, TaskFile.STATUS_IN_PROGRESS, TaskFile.STATUS_DONE)
 
     /**
+     * Окна чипа «Срок». Срок — единственная ось, у которой нет списка значений: дат столько же,
+     * сколько задач, и радио по ним было бы бесполезно. Поэтому шторка предлагает окна — те четыре,
+     * что записаны в срезе (`bd nikitatrubaev-0rk.25`); комп v2 шторку «Срока» не рисует вовсе,
+     * выдумывать сверх записанного нечего.
+     *
+     * Окна нарочно не разбиение: «сегодня» лежит внутри «на неделе». Это выбор владельца из одного
+     * радио, а не рубрики списка, — пересечение здесь ничего не ломает.
+     */
+    const val DUE_TODAY = "today"
+
+    const val DUE_WEEK = "week"
+
+    /** То же «просрочено», что рисует строка списка: у закрытой задачи просрочки нет. */
+    const val DUE_OVERDUE = "overdue"
+
+    const val DUE_NONE = "none"
+
+    val DUES = listOf(DUE_TODAY, DUE_WEEK, DUE_OVERDUE, DUE_NONE)
+
+    /**
      * «Без проекта» как значение фильтра. Пустой `project` у задачи и «не фильтруем по проекту» —
      * разные вещи, а `null` в [Filter] уже занят вторым, поэтому первому нужен свой знак. Символ
      * непечатный и записан escape-последовательностью: проекта с таким именем в `projects.md` не
@@ -32,6 +52,8 @@ object TaskFilter {
         PROJECT,
         PRIORITY,
         STATUS,
+        TAG,
+        DUE,
     }
 
     /**
@@ -43,17 +65,29 @@ object TaskFilter {
         val project: String? = null,
         val priority: String? = null,
         val status: String? = null,
+        /** Одно значение из тегов задач: реестра тегов нет по ADR, значения собирает шторка. */
+        val tag: String? = null,
+        /** Одно из окон [DUES], а не дата. */
+        val due: String? = null,
         val query: String = "",
     ) {
         /** Хоть один чип нажат или что-то введено — значит пусто «под фильтром», а не «вообще». */
         val active: Boolean
-            get() = project != null || priority != null || status != null || query.isNotBlank()
+            get() =
+                project != null ||
+                    priority != null ||
+                    status != null ||
+                    tag != null ||
+                    due != null ||
+                    query.isNotBlank()
 
         fun of(facet: Facet): String? =
             when (facet) {
                 Facet.PROJECT -> project
                 Facet.PRIORITY -> priority
                 Facet.STATUS -> status
+                Facet.TAG -> tag
+                Facet.DUE -> due
             }
 
         fun with(facet: Facet, value: String?): Filter =
@@ -61,18 +95,40 @@ object TaskFilter {
                 Facet.PROJECT -> copy(project = value)
                 Facet.PRIORITY -> copy(priority = value)
                 Facet.STATUS -> copy(status = value)
+                Facet.TAG -> copy(tag = value)
+                Facet.DUE -> copy(due = value)
             }
 
         /** Что остаётся от списка под этими чипами и этим поиском. */
-        fun select(tasks: List<TaskFile.Task>): List<TaskFile.Task> {
+        fun select(tasks: List<TaskFile.Task>, today: LocalDate): List<TaskFile.Task> {
             val text = query.trim()
             return tasks.filter { task ->
                 (project == null || (task.project ?: NO_PROJECT) == project) &&
                     (priority == null || task.priority == priority) &&
                     (status == null || task.status == status) &&
+                    (tag == null || tag in task.tags) &&
+                    (due == null || inWindow(task, today)) &&
                     (text.isEmpty() || task.title.contains(text, ignoreCase = true))
             }
         }
+
+        /**
+         * Окно срока. «На неделе» — те же семь дней, которыми меряет [dueLabel] («до пт»): два
+         * разных представления о неделе на одном экране разошлись бы молча. Незнакомое окно
+         * (испорченное состояние из `rememberSaveable`) не сужает ничего — прятать от владельца
+         * весь список из-за строки в bundle нельзя.
+         */
+        private fun inWindow(task: TaskFile.Task, today: LocalDate): Boolean =
+            when (due) {
+                DUE_TODAY -> task.due == today
+                DUE_WEEK ->
+                    task.due != null &&
+                        !task.due.isBefore(today) &&
+                        task.due.isBefore(today.plusDays(WEEK))
+                DUE_OVERDUE -> isOverdue(task, today)
+                DUE_NONE -> task.due == null
+                else -> true
+            }
 
         /**
          * Счётчики для шторки одного чипа. **Фасетные** (вердикт UX): свой фильтр из расчёта
@@ -86,10 +142,15 @@ object TaskFilter {
             tasks: List<TaskFile.Task>,
             facet: Facet,
             values: List<String>,
+            today: LocalDate,
         ): Map<String?, Int> {
-            val rest = with(facet, null).select(tasks)
+            val rest = with(facet, null).select(tasks, today)
             return (listOf(null) + values).associateWith { value ->
-                if (value == null) rest.size else Filter().with(facet, value).select(rest).size
+                if (value == null) {
+                    rest.size
+                } else {
+                    Filter().with(facet, value).select(rest, today).size
+                }
             }
         }
     }

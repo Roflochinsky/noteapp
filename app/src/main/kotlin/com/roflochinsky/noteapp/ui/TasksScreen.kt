@@ -101,7 +101,7 @@ fun TasksScreen(
     // фильтр — это «что я сейчас разглядываю», а не настройка.
     var filter by rememberSaveable(stateSaver = FilterSaver) { mutableStateOf(TaskFilter.Filter()) }
     var searching by rememberSaveable { mutableStateOf(false) }
-    val shown = filter.select(tasks)
+    val shown = filter.select(tasks, today)
     // Владелец ушёл с экрана, не дождавшись конца окна отмены, — отправку планируем здесь
     // (находка Д3). Эффект висит на экране, а не на id операции: `DisposableEffect(id)` при смене
     // id диспозился и тянул ВСЮ очередь, включая ту операцию, для которой снекбар ещё предлагал
@@ -124,7 +124,7 @@ fun TasksScreen(
                     filter = filter.copy(query = text.orEmpty())
                 },
             )
-            FilterChips(tasks, projects, filter) { filter = it }
+            FilterChips(tasks, projects, filter, today) { filter = it }
             SyncLine(sync, onSettings)
             notice?.let { DivergenceLine(it, onNotice) }
             PullToRefreshBox(
@@ -554,13 +554,14 @@ private fun NewTaskBar(onNewTask: () -> Unit) {
 }
 
 /**
- * Фильтр в `rememberSaveable`: полей четыре, и класть их четырьмя строками — это четыре ключа,
- * которые легко разъедутся. `listSaver` кладёт ровно то, что есть в [TaskFilter.Filter].
+ * Фильтр в `rememberSaveable`: полей шесть, и класть их шестью строками — это шесть ключей, которые
+ * легко разъедутся. `listSaver` кладёт ровно то, что есть в [TaskFilter.Filter], и порядок здесь
+ * обязан совпадать с порядком полей: новый чип — новая строка в обеих половинах.
  */
 private val FilterSaver =
     listSaver<TaskFilter.Filter, String?>(
-        save = { listOf(it.project, it.priority, it.status, it.query) },
-        restore = { TaskFilter.Filter(it[0], it[1], it[2], it[3].orEmpty()) },
+        save = { listOf(it.project, it.priority, it.status, it.tag, it.due, it.query) },
+        restore = { TaskFilter.Filter(it[0], it[1], it[2], it[3], it[4], it[5].orEmpty()) },
     )
 
 private const val CLOCK = 13

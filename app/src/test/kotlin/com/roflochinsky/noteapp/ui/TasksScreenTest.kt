@@ -10,6 +10,8 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isToggleable
@@ -18,6 +20,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.dp
 import com.roflochinsky.noteapp.pipeline.SyncStatus
@@ -228,6 +231,89 @@ class TasksScreenTest {
         compose.onNodeWithText("Фикс ретраев").assertDoesNotExist()
         compose.onNodeWithContentDescription("Закрыть поиск").performClick()
         compose.onNodeWithText("Фикс ретраев").assertExists()
+    }
+
+    // ── чипы «Тег» и «Срок» (комп v2, борд 1; `bd nikitatrubaev-0rk.25`) ──────────────────
+
+    /**
+     * Пять чипов компа в строку не влезают, и `LazyRow` два последних до прокрутки не компонует —
+     * без этого «Тег» и «Срок» в дереве семантики просто не существуют. Прокручиваем именно строку
+     * чипов: список задач под ней — тоже прокручиваемый узел, и `hasScrollAction()` берёт оба.
+     * Якорь — чип «Приоритет», поэтому звать до того, как строку увели вправо.
+     */
+    private fun openChip(name: String) {
+        compose
+            .onNode(hasScrollAction() and hasAnyDescendant(hasText("Приоритет")))
+            .performScrollToNode(hasText(name))
+        compose.onNodeWithText(name).performClick()
+    }
+
+    /** Тег в задаче не один, поэтому чип сужает по вхождению, а не по первому тегу. */
+    @Test
+    fun `чип тега сужает список и снимается своим крестиком`() {
+        screen(
+            listOf(
+                task("Фикс ретраев").copy(tags = listOf("релиз", "деньги")),
+                task("Разобрать фото").copy(tags = listOf("личное")),
+            )
+        )
+        openChip("Тег")
+        // «#деньги» есть и в мете строки задачи — строку шторки отличает счётчик рядом.
+        compose.onNode(hasText("#деньги") and hasText("1")).performClick()
+        compose.onNodeWithText("Фикс ретраев").assertExists()
+        compose.onNodeWithText("Разобрать фото").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Сбросить #деньги").performClick()
+        compose.onNodeWithText("Разобрать фото").assertExists()
+    }
+
+    /** Реестра тегов нет по ADR: значения шторки собираются из задач, порядок — алфавитный. */
+    @Test
+    fun `в шторке тега стоят счётчики, значения собраны из задач`() {
+        screen(
+            listOf(
+                task("Фикс ретраев").copy(tags = listOf("релиз")),
+                task("Экспорт тем").copy(tags = listOf("релиз")),
+                task("Разобрать фото").copy(tags = listOf("личное")),
+            )
+        )
+        openChip("Тег")
+        compose.onNodeWithText("Все теги").assertExists()
+        compose.onNode(hasText("#релиз") and hasText("2")).assertExists()
+        compose.onNode(hasText("#личное") and hasText("1")).assertExists()
+    }
+
+    /** Срок — не значение, а окно: шторка предлагает четыре окна, а не даты задач. */
+    @Test
+    fun `чип срока сужает список окном и снимается своим крестиком`() {
+        screen(
+            listOf(
+                task("Фикс ретраев").copy(due = LocalDate.of(2026, 8, 28)),
+                task("Разобрать фото"),
+            )
+        )
+        openChip("Срок")
+        compose.onNodeWithText("На неделе").performClick()
+        compose.onNodeWithText("Фикс ретраев").assertExists()
+        compose.onNodeWithText("Разобрать фото").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Сбросить На неделе").performClick()
+        compose.onNodeWithText("Разобрать фото").assertExists()
+    }
+
+    /** Окно без задач из шторки не пропадает, а показывает 0 — как значение реестра у проекта. */
+    @Test
+    fun `в шторке срока стоят счётчики, включая ноль у пустого окна`() {
+        screen(
+            listOf(
+                task("Фикс ретраев").copy(due = LocalDate.of(2026, 8, 28)),
+                task("Разобрать фото"),
+            )
+        )
+        openChip("Срок")
+        compose.onNode(hasText("Любой срок") and hasText("2")).assertExists()
+        compose.onNode(hasText("На неделе") and hasText("1")).assertExists()
+        compose.onNode(hasText("Без срока") and hasText("1")).assertExists()
+        // «Сегодня» и «Просроченные» пусты — но строки на месте.
+        compose.onAllNodesWithText("0").assertCountEquals(2)
     }
 
     /** Активный чип показывает выбранное значение и снимается своим крестиком (комп, борд 1). */
