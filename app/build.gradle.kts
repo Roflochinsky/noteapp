@@ -52,8 +52,16 @@ android {
 
 kotlin { jvmToolchain(17) }
 
-// Вывод смоука (RepoSmokeTest) должен быть виден в консоли гейта.
-tasks.withType<Test>().configureEach { testLogging { showStandardStreams = true } }
+// Вывод смоука (RepoSmokeTest) должен быть виден в консоли гейта — но только его: сплошной
+// showStandardStreams топил эту строку в выводе остальных полусотни тестов.
+tasks.withType<Test>().configureEach {
+  testLogging { showStandardStreams = false }
+  addTestOutputListener(
+    TestOutputListener { descriptor, event ->
+      if (descriptor.className?.endsWith("RepoSmokeTest") == true) print(event.message)
+    }
+  )
+}
 
 ktfmt { kotlinLangStyle() }
 

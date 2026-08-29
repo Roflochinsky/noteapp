@@ -114,6 +114,17 @@ class RepoStoreTest {
         assertEquals(SyncStatus.OFFLINE, store.refresh())
     }
 
+    @Test
+    fun `не-IOException не роняет экран, а становится офлайном`() {
+        val api = FakeGithubApi()
+        api.put("tasks/a.md", "---\ntitle: A\n---\n")
+        val store = RepoStore("r/n", RepoCache(tmp.newFolder()), api)
+        // 200 с не-JSON телом (кэптив-портал, HTML от CDN): org.json кидает JSONException, а она
+        // IOException не родня — раньше это улетало из корутины и убивало приложение.
+        api.fail = org.json.JSONException("A JSONObject text must begin with '{'")
+        assertEquals(SyncStatus.OFFLINE, store.refresh())
+    }
+
     private companion object {
         const val HTTP_UNAUTHORIZED = 401
         const val HTTP_FORBIDDEN = 403

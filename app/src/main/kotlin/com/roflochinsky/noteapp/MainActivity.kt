@@ -41,6 +41,7 @@ import com.roflochinsky.noteapp.ui.OnboardStep
 import com.roflochinsky.noteapp.ui.OnboardingScreen
 import com.roflochinsky.noteapp.ui.RecordSheet
 import com.roflochinsky.noteapp.ui.Tab
+import com.roflochinsky.noteapp.ui.TaskFilter
 import com.roflochinsky.noteapp.ui.TasksScreen
 import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
@@ -69,6 +70,8 @@ class MainActivity : ComponentActivity() {
     private var dialog by mutableStateOf<String?>(null) // "deepgram" | "github"
     private var input by mutableStateOf("")
     private var permTick by mutableIntStateOf(0)
+    private var repoStore: RepoStore? = null
+    private var repoKey: String? = null
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -118,7 +121,7 @@ class MainActivity : ComponentActivity() {
                         FeedScreen(
                             notes = notes,
                             isRecording = recording,
-                            tasksCount = tasks.count { !it.isDone },
+                            tasksCount = TaskFilter.openCount(tasks),
                             onTab = { screen = Screen.Feed(it) },
                             onNote = { screen = Screen.Detail(it) },
                             onRecord = ::onRecord,
@@ -172,23 +175,51 @@ class MainActivity : ComponentActivity() {
         else startForegroundService(RecordingService.toggleIntent(this))
     }
 
-    /** Кэш рисуется мгновенно, сеть догоняет фоном (решение LLD-12). */
+    /**
+     * Кэш рисуется мгновенно, сеть догоняет фоном (решение LLD-12). Индикатор поднимается первой
+     * строкой — до любого прыжка в IO, иначе он включался уже после того, как всё прочитано; гаснет
+     * в `finally`, чтобы сорвавшийся `refresh()` не оставил вертушку крутиться навсегда.
+     *
+     * `tasks()` парсит каждый файл кэша, поэтому обе выборки живут в IO: главный поток только
+     * рисует.
+     */
     private suspend fun refreshRepo() {
+        refreshing = true
+        try {
+            val store = store()
+            tasks = withContext(Dispatchers.IO) { store.tasks() }
+            val (status, fresh) = withContext(Dispatchers.IO) { store.refresh() to store.tasks() }
+            sync = status
+            tasks = fresh
+        } finally {
+            refreshing = false
+        }
+    }
+
+    /**
+     * Один фасад на сессию: он держит снимок кэша, а пересоздание на каждое обновление этот снимок
+     * выбрасывало. Ключ — репо и токен: подключили GitHub в настройках — фасад пересоберётся сам.
+     */
+    private suspend fun store(): RepoStore {
         val repo = Settings.githubRepo(this)
         val token = Settings.githubToken(this)
-        val store =
-            withContext(Dispatchers.IO) {
+        val key = "$repo:${token?.hashCode() ?: 0}"
+        repoStore
+            ?.takeIf { repoKey == key }
+            ?.let {
+                return it
+            }
+        return withContext(Dispatchers.IO) {
                 RepoStore(
                     repo = repo,
                     cache = RepoCache(RepoStore.cacheDir(filesDir)),
                     api = token?.let { GithubClient(repo, it) },
                 )
             }
-        tasks = store.tasks()
-        refreshing = true
-        sync = withContext(Dispatchers.IO) { store.refresh() }
-        tasks = store.tasks()
-        refreshing = false
+            .also {
+                repoStore = it
+                repoKey = key
+            }
     }
 
     private fun sendAction(action: String) {

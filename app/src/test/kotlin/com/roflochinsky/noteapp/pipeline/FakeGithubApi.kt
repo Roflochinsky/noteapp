@@ -14,7 +14,8 @@ class FakeGithubApi(
     var readBlobCalls = 0
         private set
 
-    var fail: IOException? = null
+    /** Шире IOException: настоящий клиент разбирает ответ через org.json и кидает JSONException. */
+    var fail: Exception? = null
 
     fun put(path: String, text: String) {
         files[path] = text

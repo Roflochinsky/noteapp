@@ -2,11 +2,11 @@ package com.roflochinsky.noteapp.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
@@ -21,8 +21,8 @@ import com.roflochinsky.noteapp.pipeline.SyncStatus
 
 /**
  * Шапка-переключатель: два заголовка рядом, активный — чернила, неактивный — приглушённый; рядом с
- * задачами моно-счётчик открытых. Лупы нет намеренно: поиска в приложении пока не существует, а
- * мёртвый контрол хуже отсутствующего (отступление от компа, вопрос владельцу).
+ * активным разделом задач — моно-счётчик открытых. Лупа приходит в Н3 вместе с чипами (решение
+ * плана 2026-08-26(а)): поиск нужен, но раньше фильтров ему не за что зацепиться.
  */
 @Composable
 fun SectionTabs(active: Tab, tasksCount: Int, onTab: (Tab) -> Unit, onSettings: () -> Unit) {
@@ -33,9 +33,9 @@ fun SectionTabs(active: Tab, tasksCount: Int, onTab: (Tab) -> Unit, onSettings: 
     ) {
         Row(verticalAlignment = Alignment.Bottom) {
             TabTitle("Заметки", active == Tab.NOTES) { onTab(Tab.NOTES) }
-            Box(Modifier.size(width = 18.dp, height = 1.dp))
+            Spacer(Modifier.width(18.dp))
             TabTitle("Задачи", active == Tab.TASKS) { onTab(Tab.TASKS) }
-            if (tasksCount > 0) {
+            if (active == Tab.TASKS && tasksCount > 0) {
                 Text(
                     tasksCount.toString(),
                     style = MaterialTheme.typography.labelMedium,

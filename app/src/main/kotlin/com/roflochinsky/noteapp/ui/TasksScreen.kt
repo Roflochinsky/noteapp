@@ -1,18 +1,23 @@
 package com.roflochinsky.noteapp.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,6 +43,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -67,7 +75,7 @@ fun TasksScreen(
 ) {
     val pull = rememberPullToRefreshState()
     Column(Modifier.fillMaxSize()) {
-        SectionTabs(Tab.TASKS, TaskFilter.open(tasks, today).size, onTab, onSettings)
+        SectionTabs(Tab.TASKS, TaskFilter.openCount(tasks), onTab, onSettings)
         SyncLine(sync, onSettings)
         PullToRefreshBox(
             isRefreshing = refreshing,
@@ -96,10 +104,10 @@ private fun TaskList(tasks: List<TaskFile.Task>, today: LocalDate) {
     val done = TaskFilter.done(tasks, today)
     var doneOpen by rememberSaveable { mutableStateOf(false) }
     LazyColumn(Modifier.fillMaxSize()) {
-        if (tasks.isEmpty()) {
+        // Пусто ровно тогда, когда нет ОТКРЫТЫХ задач. Фильтров в Н1 не существует (они в Н3),
+        // поэтому «под этот фильтр ничего не подошло» сказать нечем — это была ложь экрана.
+        if (groups.isEmpty()) {
             item { EmptyTasks() }
-        } else if (groups.isEmpty()) {
-            item { EmptyUnderState() }
         }
         groups.forEach { (priority, group) ->
             item(key = "prio-$priority") { PriorityRubric(priority) }
@@ -136,7 +144,8 @@ private fun PriorityRubric(priority: String) {
         verticalAlignment = Alignment.Bottom,
     ) {
         Text(priority, style = MaterialTheme.typography.labelMedium.copy(color = DocPalette.Ink))
-        Text(priorityWord(priority).uppercase(), style = MaterialTheme.typography.labelSmall)
+        val word = priorityWord(priority)
+        if (word.isNotEmpty()) Text(word.uppercase(), style = MaterialTheme.typography.labelSmall)
     }
 }
 
@@ -194,34 +203,74 @@ private fun TaskCheckbox(done: Boolean) {
     }
 }
 
+/**
+ * Мета-строка борда 1: проект → просрочка/срок → подзадачи → «в работе» → теги, между элементами
+ * точка-разделитель. Порядок и стиль элемента хранятся вместе — один список, а не «моно» и «текст»
+ * двумя кучами, иначе порядок компа собрать нельзя.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TaskMeta(task: TaskFile.Task, today: LocalDate) {
     val overdue = TaskFilter.isOverdue(task, today)
-    val plain = buildList {
-        task.project?.let { add(it) }
-        if (task.status == TaskFile.STATUS_IN_PROGRESS) add("в работе")
-        task.tags.forEach { add("#$it") }
-    }
-    val mono = buildList {
-        if (!overdue && !task.isDone) task.due?.let { add(dueLabel(it, today)) }
-        if (task.subtasks.isNotEmpty()) {
-            add("${task.subtasks.count { it.done }}/${task.subtasks.size}")
+    val text = MaterialTheme.typography.bodySmall
+    val mono = MaterialTheme.typography.labelMedium
+    val parts =
+        buildList<@Composable () -> Unit> {
+            task.project?.let { project -> add { Text(project, style = text) } }
+            if (overdue) {
+                add { OverdueLabel(task.due!!, today) }
+            } else if (!task.isDone) {
+                task.due?.let { due -> add { Text(dueLabel(due, today), style = mono) } }
+            }
+            if (task.subtasks.isNotEmpty()) {
+                val progress = "${task.subtasks.count { it.done }}/${task.subtasks.size}"
+                add { Text(progress, style = mono) }
+            }
+            if (task.status == TaskFile.STATUS_IN_PROGRESS) add { Text("в работе", style = text) }
+            task.tags.forEach { tag -> add { Text("#$tag", style = text) } }
         }
-    }
-    if (plain.isEmpty() && mono.isEmpty() && !overdue) return
-    Row(
+    if (parts.isEmpty()) return
+    // Мета длиннее строки переносится (комп: flex-wrap), а не режется и не ломает раскладку.
+    FlowRow(
         modifier = Modifier.padding(top = 5.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        parts.forEachIndexed { i, part ->
+            if (i > 0) Text("·", style = mono)
+            part()
+        }
+    }
+}
+
+/**
+ * Просрочка по компу: часы 13dp и полужирный янтарь — она должна кричать громче остальной меты.
+ *
+ * ponytail: часы рисуются вручную по пути из компа — ради одной иконки тащить
+ * `material-icons-extended` (тысячи векторов в APK) не стоит.
+ */
+@Composable
+private fun OverdueLabel(due: LocalDate, today: LocalDate) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (overdue) {
-            Text(
-                overdueLabel(task.due!!, today),
-                style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.Amber),
-            )
+        Canvas(Modifier.size(CLOCK.dp)) {
+            val u = size.minDimension / VIEWBOX // комп рисует в вьюбоксе 24
+            val stroke = 2f * u
+            val centre = Offset(12f * u, 12f * u)
+            drawCircle(DocPalette.Amber, radius = 8.5f * u, center = centre, style = Stroke(stroke))
+            drawLine(DocPalette.Amber, Offset(12f * u, 7.5f * u), centre, stroke, StrokeCap.Round)
+            drawLine(DocPalette.Amber, centre, Offset(15f * u, 14f * u), stroke, StrokeCap.Round)
         }
-        mono.forEach { Text(it, style = MaterialTheme.typography.labelMedium) }
-        plain.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+        Text(
+            overdueLabel(due, today),
+            style =
+                MaterialTheme.typography.bodySmall.copy(
+                    color = DocPalette.Amber,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+        )
     }
 }
 
@@ -264,15 +313,6 @@ private fun EmptyTasks() {
     }
 }
 
-@Composable
-private fun EmptyUnderState() {
-    Text(
-        "Под этот фильтр ничего не подошло",
-        style = MaterialTheme.typography.bodySmall,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 24.dp),
-    )
-}
-
 /** Заглушка среза Н1: создание задачи приходит следующим срезом. */
 @Composable
 private fun NewTaskBar() {
@@ -293,11 +333,11 @@ private fun NewTaskBar() {
                 ),
         ) {
             Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-            Box(Modifier.size(width = 10.dp, height = 1.dp))
+            Spacer(Modifier.width(10.dp))
             Text("Новая задача")
         }
         Text(
-            "создание задачи — следующий срез",
+            "задача станет файлом в tasks/ и уйдёт коммитом",
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(top = 8.dp),
         )
@@ -305,3 +345,5 @@ private fun NewTaskBar() {
 }
 
 private const val TOUCH = 48
+private const val CLOCK = 13
+private const val VIEWBOX = 24f

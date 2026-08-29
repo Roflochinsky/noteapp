@@ -77,6 +77,9 @@ fun DetailScreen(noteId: String, onBack: () -> Unit) {
     var done by remember { mutableStateOf<DoneNoteParser.DoneNote?>(null) }
     var donePath by remember { mutableStateOf<String?>(null) }
     var doneState by remember { mutableStateOf("загрузка…") }
+    // ponytail: долг v1 — деталка заметки ходит в GithubClient мимо RepoStore и нарушает инвариант
+    // «UI не знает про HTTP». Чинится в Н5 (склейка NotesStore ∪ RepoCache по NoteRef), тащить
+    // заметки в Н1 ради одного вызова дороже, чем подождать срез, который их всё равно перепишет.
     LaunchedEffect(noteId) {
         withContext(Dispatchers.IO) {
             val token = Settings.githubToken(context)

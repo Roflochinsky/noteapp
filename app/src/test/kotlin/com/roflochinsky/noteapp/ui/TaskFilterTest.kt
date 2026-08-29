@@ -38,11 +38,15 @@ class TaskFilterTest {
                 task("P1 со сроком", priority = "P1", due = "2026-08-28"),
                 task("P2 без срока, раньше").copy(created = LocalDate.of(2026, 8, 2)),
                 task("P1 просрочена", priority = "P1", due = "2026-08-24"),
+                // Со сроком и без — в одной рубрике: иначе правило «срок выше отсутствия срока»
+                // не проверяется ничем (мутация ключа переживала прежнюю фикстуру).
+                task("P1 без срока", priority = "P1"),
             )
         assertEquals(
             listOf(
                 "P1 просрочена",
                 "P1 со сроком",
+                "P1 без срока",
                 "P2 без срока, раньше",
                 "P2 без срока, позже",
                 "P3 со сроком",
@@ -121,6 +125,15 @@ class TaskFilterTest {
         assertEquals("до 5 сен", dueLabel(LocalDate.of(2026, 9, 5), today))
         assertEquals("просрочено · вчера", overdueLabel(today.minusDays(1), today))
         assertEquals("просрочено · 20 авг", overdueLabel(LocalDate.of(2026, 8, 20), today))
+    }
+
+    @Test
+    fun `слово рубрики — только у известных приоритетов`() {
+        assertEquals("высокий", priorityWord("P1"))
+        assertEquals("обычный", priorityWord("P2"))
+        assertEquals("низкий", priorityWord("P3"))
+        // Чужой приоритет из frontmatter не притворяется «обычным» — рубрика остаётся без слова.
+        assertEquals("", priorityWord("P0"))
     }
 
     @Test

@@ -1,7 +1,6 @@
 package com.roflochinsky.noteapp.pipeline
 
 import java.io.File
-import java.io.IOException
 
 /** Что показать под шапкой одной строкой (без диалогов и тостов). */
 enum class SyncStatus {
@@ -50,7 +49,10 @@ class RepoStore(
             SyncStatus.OK
         } catch (e: GithubHttpException) {
             status(e)
-        } catch (@Suppress("SwallowedException") e: IOException) {
+        } catch (@Suppress("SwallowedException", "TooGenericExceptionCaught") e: Exception) {
+            // Ловим шире IOException намеренно: ответ разбирается через org.json, а JSONException
+            // ему не родня. Ответ 200 с не-JSON телом (кэптив-портал, HTML от CDN) ронял корутину
+            // экрана целиком — для владельца это неотличимо от «нет сети», ей и показываем.
             SyncStatus.OFFLINE
         }
     }
