@@ -15,7 +15,7 @@ import org.junit.Test
  */
 class DoneNoteParserTest {
 
-    private val done = fixture("note-done-with-tasks.md")
+    private val done = ActionFixture.text("note-done-with-tasks.md")
 
     @Test
     fun `парсит мету и саммари из done-файла`() {
@@ -35,15 +35,18 @@ class DoneNoteParserTest {
         assertTrue(summary, summary.contains("\n\n**Задачи.**"))
     }
 
+    /** null даёт именно статус: саммари в файле на месте, но заметку ещё не подтвердил Action. */
     @Test
-    fun `raw-файл без саммари даёт null`() {
-        assertNull(DoneNoteParser.parse(done.replace("status: done", "status: raw")))
+    fun `заметка в статусе raw даёт null, даже когда саммари в файле уже есть`() {
+        val raw = done.replace("status: done", "status: raw")
+        assertTrue(raw, raw.contains(NoteFile.SUMMARY))
+        assertNull(DoneNoteParser.parse(raw))
     }
 
     /** Критерий 4 спеки: задач нет — секции нет; участников нет — `participants: []`. */
     @Test
     fun `заметка без задач разбирается, секции Задачи в ней нет`() {
-        val n = DoneNoteParser.parse(fixture("note-done-no-tasks.md"))!!
+        val n = DoneNoteParser.parse(ActionFixture.text("note-done-no-tasks.md"))!!
         assertEquals("Идея — маршрут вдоль набережной", n.title)
         assertEquals("идея", n.type)
         assertTrue(n.participants.isEmpty())
