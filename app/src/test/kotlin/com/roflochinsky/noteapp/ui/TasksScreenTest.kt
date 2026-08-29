@@ -1,9 +1,15 @@
 package com.roflochinsky.noteapp.ui
 
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -16,6 +22,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.GraphicsMode
 
 /**
  * Экран задач через дерево семантики: то, что до этого среза ловили только глазами на ревью.
@@ -23,13 +30,13 @@ import org.robolectric.RobolectricTestRunner
  * Robolectric, а не `androidTest`: гейт офлайновый и без устройства, эти тесты идут в общем
  * `testDebugUnitTest`.
  *
- * **Грабли, стоившие одной ложной мутации:** высоту, которую задаёт текст, здесь мерить нельзя —
- * настоящего шрифта у Robolectric нет, и строка `bodySmall` (13sp) выходит 35dp вместо ~18dp на
- * устройстве. Проверка «тач-таргет ≥48dp» на такой строке проходит сама собой и ничего не сторожит.
- * Мерить можно там, где высоту задаёт `Modifier.height` (рубрика «Сделано»); остальное проверять
- * через семантику — есть ли клик, какая роль, какое описание.
+ * **`@GraphicsMode(NATIVE)` обязателен** и стоит здесь не для красоты: в режиме по умолчанию у
+ * Robolectric нет шрифта, и текст меряется как 1px на символ («#дом» — 4px вместо 33px). Любая
+ * проверка геометрии — тач-таргет, попадание, перенос — на таких метриках либо врёт, либо проходит
+ * сама собой; одна ложная мутация на этом уже потеряна.
  */
 @RunWith(RobolectricTestRunner::class)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class TasksScreenTest {
 
     @get:Rule val compose = createComposeRule()
@@ -57,10 +64,18 @@ class TasksScreenTest {
                     sync = sync.value,
                     refreshing = false,
                     isRecording = false,
+                    notice = null,
+                    pending = { false },
                     onTab = {},
                     onRefresh = {},
                     onRecord = {},
                     onSettings = { settingsOpened++ },
+                    onTask = {},
+                    onNewTask = {},
+                    onToggle = { "" },
+                    onCancel = {},
+                    onFlush = {},
+                    onNotice = {},
                 )
             }
         }
@@ -114,6 +129,30 @@ class TasksScreenTest {
         sync.value = SyncStatus.NO_TOKEN
         compose.onNodeWithText(NO_TOKEN).assertIsEnabled().performClick()
         assertEquals(1, settingsOpened)
+    }
+
+    /**
+     * Строка синка кликабельна — значит и её тач-таргет 48dp; чинилось в Н1, тестом не держалось.
+     */
+    @Test
+    fun `строка синка держит тач-таргет 48dp`() {
+        sync.value = SyncStatus.NO_TOKEN
+        screen(emptyList())
+        compose.onNodeWithText(NO_TOKEN).assertHeightIsAtLeast(TOUCH)
+    }
+
+    /**
+     * TalkBack должен читать «флажок, не отмечено, Купить хлеб». Состояние добавляет сама роль; в
+     * описании его быть не должно — прежнее «сделана: $title» стояло и на неотмеченном флажке, то
+     * есть врало ровно там, где владелец проверить не может (находка Д11 ревью Н2).
+     */
+    @Test
+    fun `чекбокс задачи — флажок с описанием без состояния`() {
+        screen(listOf(task("Купить хлеб")))
+        compose
+            .onNode(isToggleable())
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Checkbox))
+            .assertContentDescriptionEquals("Купить хлеб")
     }
 
     private companion object {
