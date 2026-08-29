@@ -87,11 +87,13 @@ class RepoCache(val dir: File, private val repo: String, token: String?) {
                 .put("commit", snapshot.commitSha)
                 .put("files", files)
         dir.mkdirs()
-        val tmp = File(dir, "$NAME.tmp")
-        tmp.writeText(json.toString())
-        if (!tmp.renameTo(file())) {
-            file().writeText(tmp.readText())
-            tmp.delete()
+        synchronized(WRITING) {
+            val tmp = File(dir, "$NAME.tmp")
+            tmp.writeText(json.toString())
+            if (!tmp.renameTo(file())) {
+                file().writeText(tmp.readText())
+                tmp.delete()
+            }
         }
         memo = snapshot
         seen = stamp()
@@ -103,6 +105,19 @@ class RepoCache(val dir: File, private val repo: String, token: String?) {
         const val VERSION = 1
         const val NAME = "repo.json"
         const val HEX = "%02x"
+
+        /**
+         * Имя временного файла фиксировано, а экземпляров кэша над одним каталогом в узком окне
+         * смены токена бывает два: экран уже на новом фасаде, воркер дописывает свой `doWork()` на
+         * старом. Собственный монитор экземпляра их не разводит, и второй `renameTo` не находит
+         * временного файла, унесённого первым: `readText()` в фолбэке падает FileNotFoundException
+         * — а наверху это лживое «нет сети» ([RepoStore.refresh]) или пустой повтор
+         * ([RepoStore.push]).
+         *
+         * ponytail: обычный монитор на компаньоне, а не уникальные имена файлов. Процесс один
+         * (`android:process` в манифесте нет), сети под замком нет — только запись и rename.
+         */
+        val WRITING = Any()
 
         /** Отпечаток токена: смену видно, сам токен по нему не восстановить. */
         fun fingerprint(token: String?): String =
