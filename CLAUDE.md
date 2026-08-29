@@ -55,7 +55,7 @@ Gradle падает на «SDK location not found»; скопировать из
 | Спека из принятых решений | `to-spec` |
 | Срезы из спеки в beads | `to-tickets` |
 | Решения ещё не приняты | `grill-me` / `mattpocock-skills:grilling` |
-| Работа по карте решений | `mattpocock-skills:wayfinder` (v1 — nikitatrubaev-pdj, закрыта; v2 — nikitatrubaev-5dd) |
+| Работа по карте решений | `mattpocock-skills:wayfinder` (v1 — nikitatrubaev-pdj и v2 — nikitatrubaev-5dd закрыты; v3 «транскрипту можно верить» — nikitatrubaev-7cy, активна) |
 | Ревью кода | `mattpocock-skills:code-review` |
 | Баг, не работает, медленно | `mattpocock-skills:diagnosing-bugs` |
 | Любая правка UI | `impeccable:impeccable` — `DESIGN.md` + компы «Документ» v1 (nikitatrubaev-pdj.4) и v2 (nikitatrubaev-5dd.3) — жёсткое ограничение |
