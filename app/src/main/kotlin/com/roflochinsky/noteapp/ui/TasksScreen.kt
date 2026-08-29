@@ -46,6 +46,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -76,6 +77,7 @@ import kotlinx.coroutines.delay
 @Composable
 fun TasksScreen(
     tasks: List<TaskFile.Task>,
+    projects: List<String>,
     today: LocalDate,
     sync: SyncStatus,
     refreshing: Boolean,
@@ -95,6 +97,11 @@ fun TasksScreen(
 ) {
     val pull = rememberPullToRefreshState()
     var undo by remember { mutableStateOf<String?>(null) }
+    // Состояние чипов и поиска переживает поворот экрана, но не перезапуск (решение LLD-17):
+    // фильтр — это «что я сейчас разглядываю», а не настройка.
+    var filter by rememberSaveable(stateSaver = FilterSaver) { mutableStateOf(TaskFilter.Filter()) }
+    var searching by rememberSaveable { mutableStateOf(false) }
+    val shown = filter.select(tasks)
     // Владелец ушёл с экрана, не дождавшись конца окна отмены, — отправку планируем здесь
     // (находка Д3). Эффект висит на экране, а не на id операции: `DisposableEffect(id)` при смене
     // id диспозился и тянул ВСЮ очередь, включая ту операцию, для которой снекбар ещё предлагал
@@ -106,7 +113,18 @@ fun TasksScreen(
     DisposableEffect(Unit) { onDispose { onFlush() } }
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            SectionTabs(Tab.TASKS, TaskFilter.openCount(tasks), onTab, onSettings)
+            SectionTabs(
+                active = Tab.TASKS,
+                tasksCount = TaskFilter.openCount(tasks),
+                onTab = onTab,
+                onSettings = onSettings,
+                query = filter.query.takeIf { searching },
+                onQuery = { text ->
+                    searching = text != null
+                    filter = filter.copy(query = text.orEmpty())
+                },
+            )
+            FilterChips(tasks, projects, filter) { filter = it }
             SyncLine(sync, onSettings)
             notice?.let { DivergenceLine(it, onNotice) }
             PullToRefreshBox(
@@ -124,7 +142,17 @@ fun TasksScreen(
                     )
                 },
             ) {
-                TaskList(tasks, today, pending, onTask) { task ->
+                TaskList(
+                    shown,
+                    filter.active,
+                    today,
+                    pending,
+                    onTask,
+                    {
+                        filter = TaskFilter.Filter()
+                        searching = false
+                    },
+                ) { task ->
                     val id = onToggle(task)
                     undo = if (task.isDone) null else id
                     if (task.isDone) onFlush()
@@ -221,9 +249,11 @@ private fun Snack(text: String, action: String, modifier: Modifier, onAction: ()
 @Composable
 private fun TaskList(
     tasks: List<TaskFile.Task>,
+    filtered: Boolean,
     today: LocalDate,
     pending: (String) -> Boolean,
     onTask: (String) -> Unit,
+    onReset: () -> Unit,
     onToggle: (TaskFile.Task) -> Unit,
 ) {
     val groups = TaskFilter.byPriority(tasks, today)
@@ -231,10 +261,10 @@ private fun TaskList(
     var doneOpen by rememberSaveable { mutableStateOf(false) }
     LazyColumn(Modifier.fillMaxSize()) {
         // Пусто ровно тогда, когда показывать нечего вовсе: при свёрнутой рубрике «Сделано»
-        // «Задач пока нет» было бы враньём экрана. Фильтров в Н1 нет (они в Н3), поэтому
-        // «под этот фильтр ничего не подошло» сказать нечем.
+        // «Задач пока нет» было бы враньём экрана. Под активным фильтром это другое пустое
+        // состояние (вердикт UX): задачи есть, просто под чипы не подошли.
         if (TaskFilter.nothingToShow(tasks, today)) {
-            item { EmptyTasks() }
+            item { if (filtered) EmptyFiltered(onReset) else EmptyTasks() }
         }
         groups.forEach { (priority, group) ->
             item(key = "prio-$priority") { PriorityRubric(priority) }
@@ -456,6 +486,27 @@ private fun DoneFold(count: Int, open: Boolean, onToggle: () -> Unit) {
     }
 }
 
+/**
+ * Пусто под фильтром — не то же, что «задач нет вовсе»: иллюстрации здесь нет (она про пустой
+ * трекер, а он не пуст), зато есть выход одним тапом.
+ */
+@Composable
+private fun EmptyFiltered(onReset: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(top = 60.dp, start = 40.dp, end = 40.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Text("Под этот фильтр ничего не подошло", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "Сбросить фильтры",
+            style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.Blue),
+            modifier =
+                Modifier.clickable(onClick = onReset).heightIn(min = TOUCH.dp).wrapContentHeight(),
+        )
+    }
+}
+
 @Composable
 private fun EmptyTasks() {
     Column(
@@ -501,6 +552,16 @@ private fun NewTaskBar(onNewTask: () -> Unit) {
         )
     }
 }
+
+/**
+ * Фильтр в `rememberSaveable`: полей четыре, и класть их четырьмя строками — это четыре ключа,
+ * которые легко разъедутся. `listSaver` кладёт ровно то, что есть в [TaskFilter.Filter].
+ */
+private val FilterSaver =
+    listSaver<TaskFilter.Filter, String?>(
+        save = { listOf(it.project, it.priority, it.status, it.query) },
+        restore = { TaskFilter.Filter(it[0], it[1], it[2], it[3].orEmpty()) },
+    )
 
 private const val CLOCK = 13
 private const val VIEWBOX = 24f

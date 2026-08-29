@@ -106,6 +106,25 @@ class FakeGithubApi(
         return Written(null, commitSha)
     }
 
+    /**
+     * Пачка применяется целиком и двигает коммит один раз — как настоящий git data API. Хук
+     * [onWrite] здесь тоже срабатывает: батч — такая же мутация, и «пока мы собирали пачку, в git
+     * приехало своё» проверяется тем же способом.
+     */
+    override fun commitBatch(changes: List<BatchPlan.Change>, message: String): Written {
+        if (changes.isEmpty()) return Written(null, "")
+        before()
+        changes.forEach { change ->
+            when (change) {
+                is BatchPlan.Put -> files[change.path] = change.content
+                is BatchPlan.Delete -> files.remove(change.path)
+            }
+        }
+        changes.filterIsInstance<BatchPlan.Put>().forEach { blobs[sha(it.content)] = it.content }
+        commitSha = "commit-${files.hashCode()}"
+        return Written(null, commitSha)
+    }
+
     private fun before() {
         fail?.let { throw it }
         writeCalls++

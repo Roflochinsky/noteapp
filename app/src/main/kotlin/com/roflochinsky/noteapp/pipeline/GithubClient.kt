@@ -16,11 +16,16 @@ import org.json.JSONObject
  * @param repo вида "owner/name".
  * @param fetch транспорт GET одной строкой: в бою — `HttpURLConnection`, в тестах — снятые с репо
  *   фикстуры. Разбор ответа так проверяется без сети (решение HLD про `HttpTransport`).
+ * @param write тот же шов для мутаций (метод, URL, тело): без него цепочка батча — пять запросов и
+ *   пересборка на 422 — проверялась бы только живой сетью.
  */
 class GithubClient(
     private val repo: String,
     private val token: String,
     private val fetch: (String) -> String = { url -> httpGet(url, token) },
+    private val write: (String, String, String) -> String = { method, url, body ->
+        httpSend(method, url, body, token)
+    },
 ) : GithubApi {
 
     override fun readRef(): String =
@@ -50,11 +55,42 @@ class GithubClient(
                 .put("message", message)
                 .put("content", Base64.getEncoder().encodeToString(content.toByteArray()))
         sha?.let { body.put("sha", it) }
-        return written(send("PUT", path, body))
+        return written(write("PUT", contents(repo, path), body.toString()))
     }
 
-    override fun deleteFile(path: String, message: String, sha: String): Written =
-        written(send("DELETE", path, JSONObject().put("message", message).put("sha", sha)))
+    override fun deleteFile(path: String, message: String, sha: String): Written {
+        val body = JSONObject().put("message", message).put("sha", sha)
+        return written(write("DELETE", contents(repo, path), body.toString()))
+    }
+
+    /**
+     * Пять запросов на любую пачку: ref → базовое дерево → новое дерево → коммит → движение ветки.
+     *
+     * `force: false` отклоняет коммит, если ветка успела уйти вперёд (Action записал саммари) —
+     * тогда пачка пересобирается на новом HEAD **один** раз. Второй отказ уходит наружу
+     * исключением: бесконечно догонять чужие коммиты миграция не должна, а `force: true` в noteapp
+     * не бывает никогда.
+     */
+    override fun commitBatch(changes: List<BatchPlan.Change>, message: String): Written {
+        if (changes.isEmpty()) return Written(null, "")
+        repeat(ATTEMPTS) { attempt ->
+            val head = readRef()
+            val base = JSONObject(fetch("$API/$repo/git/commits/$head")).getJSONObject("tree")
+            val tree = post("git/trees", BatchPlan.tree(base.getString("sha"), changes))
+            val commit = post("git/commits", BatchPlan.commit(message, tree, head))
+            try {
+                write("PATCH", "$API/$repo/git/refs/heads/main", BatchPlan.ref(commit).toString())
+                return Written(null, commit)
+            } catch (e: GithubHttpException) {
+                if (e.code != HTTP_UNPROCESSABLE || attempt == ATTEMPTS - 1) throw e
+            }
+        }
+        error("недостижимо: цикл возвращает или бросает")
+    }
+
+    /** Объекты git создаются POST-ом и отвечают своим SHA — только он нам и нужен. */
+    private fun post(endpoint: String, body: JSONObject): String =
+        JSONObject(write("POST", "$API/$repo/$endpoint", body.toString())).getString("sha")
 
     private fun written(response: String): Written {
         val json = JSONObject(response)
@@ -62,22 +98,6 @@ class GithubClient(
             sha = json.optJSONObject("content")?.optString("sha")?.takeIf { it.isNotEmpty() },
             commitSha = json.getJSONObject("commit").getString("sha"),
         )
-    }
-
-    /** Мутации идут мимо шва [fetch]: он читающий, а тело ответа записи нужно целиком. */
-    @Throws(IOException::class)
-    private fun send(method: String, path: String, body: JSONObject): String {
-        val conn = open("$API/$repo/contents/${encodePath(path)}", token)
-        try {
-            conn.requestMethod = method
-            conn.doOutput = true
-            conn.setRequestProperty("Content-Type", "application/json")
-            conn.outputStream.use { it.write(body.toString().toByteArray()) }
-            check(conn)
-            return conn.inputStream.bufferedReader().readText()
-        } finally {
-            conn.disconnect()
-        }
     }
 
     /** Ответы GitHub приходят с переносами строк; кодировка задана явно — в репо кириллица. */
@@ -88,12 +108,40 @@ class GithubClient(
         const val API = "https://api.github.com/repos"
         const val TIMEOUT_MS = 60_000
         const val ERR_PREVIEW = 300
+        const val HTTP_UNPROCESSABLE = 422
+
+        /** Попытка плюс ровно одна пересборка на 422 — больше миграция не догоняет. */
+        const val ATTEMPTS = 2
         val SUCCESS_RANGE = 200..299
 
         @Throws(IOException::class)
         fun httpGet(url: String, token: String): String {
             val conn = open(url, token)
             try {
+                check(conn)
+                return conn.inputStream.bufferedReader().readText()
+            } finally {
+                conn.disconnect()
+            }
+        }
+
+        /**
+         * Мутация с телом: тот же путь, что был у одиночного PUT, — общий на contents и git data.
+         *
+         * **PATCH и JVM.** `HttpURLConnection` в OpenJDK метод `PATCH` не принимает
+         * (`ProtocolException`), реализация Android (OkHttp) — принимает. Боевой путь приложения —
+         * Android, а JVM-прогоны (смоук, разовая миграция) подставляют свой шов [write] поверх
+         * `java.net.http.HttpClient`. Проверить андроидную ветку офлайн нечем — на устройстве её
+         * первым тронет срез Н6 (`bd nikitatrubaev-0rk.24`).
+         */
+        @Throws(IOException::class)
+        fun httpSend(method: String, url: String, body: String, token: String): String {
+            val conn = open(url, token)
+            try {
+                conn.requestMethod = method
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.outputStream.use { it.write(body.toByteArray()) }
                 check(conn)
                 return conn.inputStream.bufferedReader().readText()
             } finally {
@@ -119,6 +167,9 @@ class GithubClient(
                 throw GithubHttpException(code, "GitHub HTTP $code: $err")
             }
         }
+
+        /** Единственный на всё приложение способ назвать файл репо в contents API. */
+        fun contents(repo: String, path: String): String = "$API/$repo/contents/${encodePath(path)}"
 
         /** Пробел в пути — `%20`, не `+`; кириллица — UTF-8-проценты. */
         fun encodePath(path: String): String =
