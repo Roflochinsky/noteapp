@@ -75,12 +75,20 @@ private fun Sheet(onDismiss: () -> Unit, content: @Composable () -> Unit) {
     }
 }
 
+/**
+ * Заголовок шторки — комп v2, `.sheet .title` (борды 2, 4 и 7): обычный регистр, вес заголовка,
+ * отбивка 8px. Роль DESIGN.md — Headline («тот же голос ступенью ниже»), и все три шторки компа
+ * набраны им одинаково, поэтому заголовок один на все шторки.
+ *
+ * До среза `bd nikitatrubaev-0rk.26` здесь стоял `labelSmall` ПРОПИСНЫМИ 11sp — рубрика вместо
+ * заголовка, прямо против «правила рубрики» DESIGN.md.
+ */
 @Composable
 private fun SheetTitle(text: String) {
     Text(
-        text.uppercase(),
-        style = MaterialTheme.typography.labelSmall,
-        modifier = Modifier.padding(bottom = 6.dp),
+        text,
+        style = MaterialTheme.typography.headlineSmall,
+        modifier = Modifier.padding(bottom = 8.dp),
     )
 }
 
@@ -338,11 +346,7 @@ fun NewTaskSheet(
                 Cta("Добавить", tag.isNotBlank()) { add() }
             }
             null -> {
-                Text(
-                    "Новая задача",
-                    style = MaterialTheme.typography.headlineSmall,
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
+                SheetTitle("Новая задача")
                 InputBox(draft.title, "что сделать", { draft = draft.copy(title = it) }) {
                     if (draft.title.isNotBlank()) onCreate(draft)
                 }
