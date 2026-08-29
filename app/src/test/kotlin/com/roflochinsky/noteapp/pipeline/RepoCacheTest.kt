@@ -16,6 +16,9 @@ class RepoCacheTest {
 
     @get:Rule val tmp = TemporaryFolder()
 
+    /** Гонка редкая — ловим её повтором, а не сном в боевом коде. */
+    private val races = 3000
+
     private val repo = "Roflochinsky/voice-notes-test"
     private val token = "ghp_stary1Token00000000000000000000000000"
 
@@ -92,6 +95,38 @@ class RepoCacheTest {
     @Test
     fun `пустой каталог — холодный старт`() {
         assertEquals(RepoCache.Snapshot(), cache(tmp.newFolder()).load())
+    }
+
+    /**
+     * Смена токена, пока воркер тянет очередь: экран уже на новом фасаде, а воркер дописывает свой
+     * `doWork()` на старом — два экземпляра кэша над одним каталогом и одним `repo.json.tmp`.
+     * Собственный монитор экземпляра их не разводит: второй `renameTo` не находит временного файла,
+     * унесённого первым, и `readText()` в фолбэке падает FileNotFoundException.
+     *
+     * Гонка редкая — ловим её повтором, а не сном в боевом коде. Ловится именно числом попыток:
+     * запись побольше ядро само сериализует под замком inode и окно закрывает, поэтому снимки тут
+     * маленькие, а повторов много (замер: 3000 повторов — полсекунды, ловит; 400 повторов записью в
+     * 60 КБ — две секунды и не ловит).
+     */
+    @Test
+    fun `два экземпляра кэша над одним каталогом не мешают друг другу`() {
+        val dir = tmp.newFolder()
+        val boom = java.util.concurrent.atomic.AtomicReference<Throwable>()
+        val gate = java.util.concurrent.CyclicBarrier(2)
+        val threads =
+            listOf(snapshot, snapshot.copy(commitSha = "чужой коммит")).map { what ->
+                val cache = cache(dir)
+                Thread {
+                    repeat(races) {
+                        gate.await()
+                        runCatching { cache.save(what) }.onFailure(boom::set)
+                    }
+                }
+            }
+        threads.forEach { it.start() }
+        threads.forEach { it.join() }
+        assertEquals("запись кэша не должна падать: ${boom.get()}", null, boom.get())
+        assertTrue("кэш ушёл в холодный старт", cache(dir).load().files.isNotEmpty())
     }
 
     @Test

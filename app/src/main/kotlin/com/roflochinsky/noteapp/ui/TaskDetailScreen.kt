@@ -4,8 +4,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,7 +55,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -64,6 +64,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import com.roflochinsky.noteapp.pipeline.Edit
 import com.roflochinsky.noteapp.pipeline.TaskFile
@@ -343,14 +344,22 @@ private fun Fields(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                task.tags.forEach { tag ->
-                    RemovableTag(tag) { onEdit(Edit.SetField("tags", tagsValue(task.tags - tag))) }
+                val touch = LocalViewConfiguration.current
+                CompositionLocalProvider(
+                    LocalViewConfiguration provides remember(touch) { DrawnTouch(touch) }
+                ) {
+                    task.tags.forEach { tag ->
+                        RemovableTag(tag) {
+                            onEdit(Edit.SetField("tags", tagsValue(task.tags - tag)))
+                        }
+                    }
+                    Text(
+                        "+ тег",
+                        style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.Blue),
+                        modifier =
+                            Modifier.clickable { onSheet(Sheet.TAG) }.padding(horizontal = 8.dp),
+                    )
                 }
-                Text(
-                    "+ тег",
-                    style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.Blue),
-                    modifier = Modifier.clickable { onSheet(Sheet.TAG) }.padding(horizontal = 8.dp),
-                )
             }
         }
         HorizontalDivider(color = DocPalette.Line)
@@ -606,38 +615,27 @@ private fun ActionButton(
 }
 
 /**
- * Крестик у тега рисуется в самом чипе — отдельного режима правки нет. Сносит тег ТОЛЬКО крестик, и
- * кликабелен ровно он: 12dp иконка плюс отступ. Тап по тексту тег не убивает (подтверждения у такой
- * мелочи быть не должно).
+ * Ряд тегов живёт по правилу «цель ровно та, что нарисована»: [DrawnTouch] урезает штатный мазок
+ * Compose до 24dp, поэтому зона крестика не вылезает за чип. Сносит тег ТОЛЬКО крестик; тап по
+ * имени тега и по зазорам между чипами не делает ничего (подтверждения у такой мелочи быть не
+ * должно, а отмены удаления на деталке нет).
  *
- * Мазок вокруг крестика добирает near-hit Compose (см. [TOUCH]) — палец попадает по 12dp иконке. Но
- * мазок симметричен по ОБЕИМ осям (`max(0, (48 − 12)/2)` = 18dp на сторону), поэтому у короткого
- * тега (`#a`, `#дом`) он накрывает и имя: без конкурента тап по имени молча сносил бы тег.
- * Конкурент — сам чип: он глотает тап [pointerInput]-ом, и это НАСТОЯЩЕЕ попадание, которое в своей
- * корзине `isInLayer` сильнее любого near-hit. Крестик лежит глубже чипа, поэтому тап по нему
- * по-прежнему достаётся крестику. Видимая геометрия не меняется ни на dp — глушилка стоит до
- * `padding`, так что накрывает ровно нарисованный чип.
+ * Кликабельная зона крестика — ровно 12×12dp: `padding(start = 2.dp)` стоит ПОСЛЕ `size(12.dp)`, то
+ * есть живёт внутри них и зону не расширяет, а иконка рисуется 10dp со сдвигом вправо. С мазком
+ * 24dp попасть в неё надо с точностью ±6dp — это и есть цена неотменяемого удаления.
  *
- * `clickable` на чипе для этого не годится: он объявил бы чип кнопкой для TalkBack и дал бы рипл
- * там, где тап ничего не делает.
- *
- * Крестику мазок остаётся снаружи чипа: по вертикали — вся строка поля (48dp, соседних настоящих
- * попаданий там нет), по горизонтали — 6dp зазора до следующего чипа. Внутри чипа зона крестика
- * равна нарисованной, и это правильная цена: удаление тега на деталке ничем не отменяется, целиться
- * в видимый крестик честнее, чем сносить тег мазком по имени.
- *
- * ponytail: остаточный риск — 2dp зазора `spacedBy` между рядами тегов: настоящего попадания в нём
- * нет, и тап туда достаётся ближайшему near-hit, то есть крестику ряда выше. Сам чип второго ряда
- * от этого закрыт — глушилка и у него. Разводить ряды комп не даёт (`bd nikitatrubaev-0rk.18`).
+ * Так выглядела прошлая попытка и почему её здесь нет: чип глотал тап `pointerInput`-ом, чтобы
+ * перебить мазок крестика настоящим попаданием. Не работает — крестик ПОТОМОК чипа, а попадание в
+ * родителя near-hit потомка не отменяет (`HitTestResult.isHitInMinimumTouchTargetBetter` сравнивает
+ * только то, что глубже текущего узла) и потомок получает Main-проход первым. Глушилка закрывала
+ * чип лишь от крестика СОСЕДНЕГО чипа. Поймано тестом «тап по имени тега не удаляет тег» (`bd
+ * nikitatrubaev-0rk.21`), закрыт заодно и зазор между рядами (`bd nikitatrubaev-0rk.18`).
  */
 @Composable
 private fun RemovableTag(tag: String, onRemove: () -> Unit) {
     Row(
         modifier =
             Modifier.background(DocPalette.Paper2, RoundedCornerShape(8.dp))
-                .pointerInput(Unit) {
-                    awaitEachGesture { awaitFirstDown(requireUnconsumed = false) }
-                }
                 .padding(start = 10.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -653,6 +651,20 @@ private fun RemovableTag(tag: String, onRemove: () -> Unit) {
                     .padding(start = 2.dp),
         )
     }
+}
+
+/**
+ * Мазок вокруг мелкой цели (`minimumTouchTargetSize`, штатно 48dp) урезан до 24dp — минимума WCAG
+ * 2.5.8 для размера цели. Радиус симметричен: `max(0, (24 − 12)/2)` = 6dp на сторону — ровно
+ * внутренний отступ чипа справа и расстояние от иконки до его верхней и нижней кромок. Поэтому зона
+ * крестика упирается в границы нарисованного чипа и не достаёт ни до имени тега, ни до зазора
+ * `spacedBy` между рядами. Разметку это не двигает ни на dp: радиус читает только hit-тест.
+ *
+ * Область действия — ровно содержимое ряда тегов. Соседям 48dp нужен: сегмент статуса нарисован на
+ * 38dp и добирает высоту мазком.
+ */
+private class DrawnTouch(base: ViewConfiguration) : ViewConfiguration by base {
+    override val minimumTouchTargetSize = DpSize(24.dp, 24.dp)
 }
 
 /** Теги во frontmatter — инлайн-список; пустой список означает «ключ убрать». */
