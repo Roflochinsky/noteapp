@@ -131,6 +131,7 @@ class WriteQueue(private val dir: File) {
                 is Edit.ToggleSubtask -> json.put("text", edit.text).put("done", edit.done)
                 is Edit.AddSubtask -> json.put("text", edit.text)
                 is Edit.CreateTask -> json.put("content", edit.content)
+                is Edit.AddToRegistry -> json.put("name", edit.name)
                 Edit.DeleteFile -> json
             }
         }
@@ -148,6 +149,7 @@ class WriteQueue(private val dir: File) {
                     Edit.ToggleSubtask(json.getString("text"), json.getBoolean("done"))
                 "AddSubtask" -> Edit.AddSubtask(json.getString("text"))
                 "CreateTask" -> Edit.CreateTask(json.getString("content"))
+                "AddToRegistry" -> Edit.AddToRegistry(json.getString("name"))
                 "DeleteFile" -> Edit.DeleteFile
                 else -> error("неизвестная операция очереди: $type")
             }
