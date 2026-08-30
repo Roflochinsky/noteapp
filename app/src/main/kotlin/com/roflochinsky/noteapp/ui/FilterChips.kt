@@ -28,10 +28,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.roflochinsky.noteapp.pipeline.TaskFile
+import java.time.LocalDate
 
 /**
- * Чипы-фильтры экрана задач по компу v2 (борды 1 и 2): «Проект», «Приоритет», «Статус» одной
- * горизонтальной строкой под шапкой, выбор — шторкой со счётчиками.
+ * Чипы-фильтры экрана задач по компу v2 (борды 1 и 2): «Проект», «Приоритет», «Статус», «Тег»,
+ * «Срок» одной горизонтальной строкой под шапкой в этом порядке, выбор — шторкой со счётчиками.
+ * Порядок задаёт [TaskFilter.Facet]: строка чипов и есть перечисление осей.
  *
  * Счётчики **фасетные** (вердикт UX): свой чип из расчёта исключён, чужие учитываются, а значения
  * реестра без задач остаются со счётчиком 0 — иначе шторка врёт про то, что покажет список.
@@ -45,6 +47,7 @@ fun FilterChips(
     tasks: List<TaskFile.Task>,
     projects: List<String>,
     filter: TaskFilter.Filter,
+    today: LocalDate,
     onFilter: (TaskFilter.Filter) -> Unit,
 ) {
     var open by remember { mutableStateOf<TaskFilter.Facet?>(null) }
@@ -70,7 +73,7 @@ fun FilterChips(
             choices =
                 listOf(Choice(null, all(facet))) + values.map { Choice(it, label(facet, it)) },
             selected = filter.of(facet),
-            counts = filter.counts(tasks, facet, values),
+            counts = filter.counts(tasks, facet, values, today),
             onDismiss = { open = null },
         ) { picked ->
             onFilter(filter.with(facet, picked))
@@ -125,6 +128,8 @@ private fun facetName(facet: TaskFilter.Facet): String =
         TaskFilter.Facet.PROJECT -> "Проект"
         TaskFilter.Facet.PRIORITY -> "Приоритет"
         TaskFilter.Facet.STATUS -> "Статус"
+        TaskFilter.Facet.TAG -> "Тег"
+        TaskFilter.Facet.DUE -> "Срок"
     }
 
 /** Строка сброса в шторке: она же показывает, сколько станет без этого чипа. */
@@ -133,12 +138,18 @@ private fun all(facet: TaskFilter.Facet): String =
         TaskFilter.Facet.PROJECT -> "Все проекты"
         TaskFilter.Facet.PRIORITY -> "Все приоритеты"
         TaskFilter.Facet.STATUS -> "Все статусы"
+        TaskFilter.Facet.TAG -> "Все теги"
+        TaskFilter.Facet.DUE -> "Любой срок"
     }
 
 /**
  * Значения чипа. Проекты — из реестра `projects.md` плюс те, что уже стоят в задачах: реестр
  * пополняется руками, и задача с незнакомым проектом не должна выпадать из фильтра. «Без проекта» —
  * последней строкой, как в компе.
+ *
+ * Теги — только из задач: реестра тегов нет по ADR. Порядок алфавитный, потому что взяться ему
+ * больше неоткуда: у проектов очередь задаёт `projects.md`, а тут список каждый раз собирается
+ * заново, и порядок обхода задач переставлял бы строки шторки при каждой правке.
  */
 private fun values(
     facet: TaskFilter.Facet,
@@ -150,6 +161,8 @@ private fun values(
             (projects + tasks.mapNotNull { it.project }).distinct() + TaskFilter.NO_PROJECT
         TaskFilter.Facet.PRIORITY -> TaskFilter.PRIORITIES
         TaskFilter.Facet.STATUS -> TaskFilter.STATUSES
+        TaskFilter.Facet.TAG -> tasks.flatMap { it.tags }.distinct().sorted()
+        TaskFilter.Facet.DUE -> TaskFilter.DUES
     }
 
 private fun label(facet: TaskFilter.Facet, value: String): String =
@@ -158,6 +171,18 @@ private fun label(facet: TaskFilter.Facet, value: String): String =
         TaskFilter.Facet.PRIORITY ->
             priorityWord(value).let { if (it.isEmpty()) value else "$value · $it" }
         TaskFilter.Facet.STATUS -> statusWord(value)
+        TaskFilter.Facet.TAG -> "#$value"
+        TaskFilter.Facet.DUE -> dueWord(value)
+    }
+
+/** Слова окон срока: чип и шторка говорят о наборе задач, поэтому «Просроченные», а не «Срок». */
+private fun dueWord(due: String): String =
+    when (due) {
+        TaskFilter.DUE_TODAY -> "Сегодня"
+        TaskFilter.DUE_WEEK -> "На неделе"
+        TaskFilter.DUE_OVERDUE -> "Просроченные"
+        TaskFilter.DUE_NONE -> "Без срока"
+        else -> due
     }
 
 /**

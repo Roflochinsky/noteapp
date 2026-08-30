@@ -1,6 +1,8 @@
 package com.roflochinsky.noteapp.pipeline
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -45,5 +47,48 @@ class RegistryTest {
     @Test
     fun `реестра нет — список пуст, а не исключение`() {
         assertEquals(emptyList<String>(), Registry.names(null))
+    }
+
+    @Test
+    fun `новый проект дописывается строкой после последнего элемента`() {
+        val was = fixture("projects.md")
+        assertEquals(was + "- voicebox\n", Registry.add(was, "voicebox"))
+    }
+
+    /**
+     * Второй такой же проект в реестре — это два разных значения чипа с одним смыслом. `null`
+     * значит «писать нечего»: коммита не будет, а владелец получит уже существующее имя.
+     */
+    @Test
+    fun `имя уже в реестре — писать нечего, регистр и пробелы не считаются`() {
+        val was = fixture("projects.md")
+        assertNull(Registry.add(was, "tgsum"))
+        assertNull(Registry.add(was, "TGSum"))
+        assertNull(Registry.add(was, "  noteapp  "))
+        assertNull(Registry.add(was, "   "))
+    }
+
+    /**
+     * Реестр правится и руками, и внизу файла может лежать пояснение. Новая строка встаёт в список,
+     * а не под текст: приписанная в конец, она оторвалась бы от списка, который читают глазами в
+     * GitHub.
+     */
+    @Test
+    fun `строка встаёт в список, а не под текст в конце файла`() {
+        val md =
+            """
+            # Проекты
+
+            - tgsum — Telegram export → Markdown CLI
+            - noteapp
+
+            Список правится руками.
+            """
+                .trimIndent()
+        assertEquals(
+            listOf("tgsum", "noteapp", "voicebox"),
+            Registry.names(Registry.add(md, "voicebox")),
+        )
+        assertTrue(Registry.add(md, "voicebox")!!.trimEnd().endsWith("Список правится руками."))
     }
 }

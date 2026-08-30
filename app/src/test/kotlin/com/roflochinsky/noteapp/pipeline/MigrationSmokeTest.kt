@@ -107,6 +107,10 @@ class MigrationSmokeTest {
                         "    + ${it.path} · «${it.title}» · ${if (it.done) "done" else "open"}"
                     )
                     appendLine("    ~ строка-чекбокс становится ссылкой")
+                    it.subtasks.forEach { sub ->
+                        val mark = if (sub.done) "done" else "open"
+                        appendLine("      ↳ подзадачей внутри: «${sub.text}» · $mark")
+                    }
                 }
             }
         plan.skipped.forEach { appendLine("  пропущена (нет даты): $it") }
@@ -117,7 +121,8 @@ class MigrationSmokeTest {
                 "не тронуто ${notes - changed - plan.skipped.size}"
         )
         appendLine(
-            "  итого: задач ${plan.made.size}, файлов в коммите ${plan.changes.size}, " +
+            "  итого: задач ${plan.made.size} (подзадач внутри них " +
+                "${plan.made.sumOf { it.subtasks.size }}), файлов в коммите ${plan.changes.size}, " +
                 "коммит один: «${Migration.MESSAGE}»"
         )
     }

@@ -112,7 +112,7 @@ class RepoStore(
                 overlay(ops, snapshot, ::isTask).map { (path, text) -> TaskFile.parse(path, text) },
             pending = ops.map { it.path }.toSet(),
             notice = takeDivergence(),
-            projects = Registry.names(snapshot.files[Registry.PROJECTS]?.text),
+            projects = projects(ops, snapshot),
             notes =
                 overlay(ops, snapshot, NoteRef::isNote).mapNotNull { (path, text) ->
                     NoteFile.parse(path, text)
@@ -160,6 +160,15 @@ class RepoStore(
         queue.enqueue(path, Edit.CreateTask(text))
         return path
     }
+
+    /**
+     * Новый проект из шторки — строкой в `projects.md` (комп v2, борд 2, `bd
+     * nikitatrubaev-0rk.23`). Реестр едет теми же рельсами, что и задачи: операция в журнале,
+     * коммит воркером, кэш из ответа записи. Дубликат отсекает [Registry.add] в момент отправки —
+     * на тексте из git, а не на нашем кэше: пока правка ждала сети, тот же проект мог завести
+     * Action или второе устройство.
+     */
+    fun addProject(name: String): String = edit(Registry.PROJECTS, Edit.AddToRegistry(name))
 
     fun delete(path: String): String = edit(path, Edit.DeleteFile)
 
@@ -271,6 +280,7 @@ class RepoStore(
             when (val edit = op.edit) {
                 is Edit.CreateTask -> born(api, op, edit)
                 Edit.DeleteFile -> gone(api, op)
+                is Edit.AddToRegistry -> listed(api, op, edit)
                 else -> sent(api, op)
             }
         } catch (e: GithubHttpException) {
@@ -297,6 +307,44 @@ class RepoStore(
     private fun born(api: GithubApi, op: WriteQueue.Op, edit: Edit.CreateTask): Push {
         val written = api.putFile(op.path, edit.content, message(op), null)
         accept(op.path, RepoCache.Entry(written.sha.orEmpty(), edit.content), written.commitSha)
+        return drop(op)
+    }
+
+    /**
+     * Реестр — не задача: строки в нём независимы, сливать трёхсторонне нечего, а [Registry.add]
+     * идемпотентен. Поэтому у него свой путь отправки рядом с [born] и [gone]: дописать строку в
+     * тот текст, что лежит в git сейчас, — и переиграть на 409, а не показывать расхождение.
+     *
+     * ponytail: реестра в репо нет вовсе — 404 уйдёт общей веткой [vanished]; сообщение назовёт его
+     * задачей, зато владелец узнает. Заводить `projects.md` за владельца приложение не берётся:
+     * реестр — часть раскладки репо заметок (ADR `2026-08-26-tasks-as-files.md`).
+     */
+    private fun listed(api: GithubApi, op: WriteQueue.Op, edit: Edit.AddToRegistry): Push {
+        val entry = snapshot.files[op.path] ?: api.readFile(op.path)
+        // Имя уже в реестре — цель владельца достигнута чужим коммитом, пустой коммит не нужен.
+        val text = Registry.add(entry.text, edit.name) ?: return drop(op)
+        return try {
+            val written = api.putFile(op.path, text, message(op), entry.sha)
+            accept(op.path, RepoCache.Entry(written.sha ?: entry.sha, text), written.commitSha)
+            drop(op)
+        } catch (e: GithubHttpException) {
+            if (e.code != HTTP_CONFLICT) throw e
+            replay(api, op, edit)
+        }
+    }
+
+    /**
+     * Реестр изменили под нами. Чужая строка нашей не мешает — перечитываем и дописываем заново.
+     * Кончились попытки — говорим владельцу про реестр и про его проект: молчать нельзя, он видел
+     * имя в чипе и считает, что оно записано.
+     */
+    private fun replay(api: GithubApi, op: WriteQueue.Op, edit: Edit.AddToRegistry): Push {
+        accept(op.path, api.readFile(op.path), commitSha = "")
+        if (op.attempt < ConflictRule.MAX_REPLAYS) {
+            queue.retry(op)
+            return Push.MORE
+        }
+        say("Проект «${edit.name}» не записан в ${op.path} — реестр меняли одновременно, повторите")
         return drop(op)
     }
 
@@ -439,15 +487,27 @@ class RepoStore(
         return texts
     }
 
+    /**
+     * Значения чипа «Проект»: реестр из кэша плюс имена, которые ещё ждут отправки. Без второй
+     * половины проект, заведённый из шторки, пропадал бы из выбора до первого коммита — а задача с
+     * ним уже создана, и отфильтровать её было бы нечем (`bd nikitatrubaev-0rk.23`).
+     */
+    private fun projects(ops: List<WriteQueue.Op>, snapshot: RepoCache.Snapshot): List<String> =
+        (Registry.names(snapshot.files[Registry.PROJECTS]?.text) +
+                ops.filter { it.path == Registry.PROJECTS }
+                    .mapNotNull { (it.edit as? Edit.AddToRegistry)?.name })
+            .distinct()
+
     private fun isTask(path: String): Boolean =
         path.startsWith(TaskFile.DIR) && path.endsWith(".md")
 
     private fun message(op: WriteQueue.Op): String {
         val name = op.path.substringAfterLast('/')
         val what = if (NoteRef.isNote(op.path)) "заметки" else "задачи"
-        return when (op.edit) {
+        return when (val edit = op.edit) {
             is Edit.CreateTask -> "Новая задача $name"
             Edit.DeleteFile -> "Удалена задача $name"
+            is Edit.AddToRegistry -> "Новый проект ${edit.name} в $name"
             else -> "Правка $what $name"
         }
     }

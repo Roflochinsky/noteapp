@@ -24,8 +24,17 @@ object Migration {
     /** Сообщение коммита — по нему миграцию находят в истории и снимают одним `revert`. */
     const val MESSAGE = "migration: tasks v2"
 
-    /** Что превратится в задачу: [note] — заметка-источник, [path] — будущий файл. */
-    data class Made(val note: String, val title: String, val path: String, val done: Boolean)
+    /**
+     * Что превратится в задачу: [note] — заметка-источник, [path] — будущий файл, [subtasks] — её
+     * подпункты, вложенные в заметке под этот чекбокс (своих файлов у них нет).
+     */
+    data class Made(
+        val note: String,
+        val title: String,
+        val path: String,
+        val done: Boolean,
+        val subtasks: List<TaskFile.Subtask> = emptyList(),
+    )
 
     /**
      * [skipped] — заметки с чекбоксами, у которых не нашлось даты: имя файла задачи получилось бы
@@ -63,6 +72,15 @@ object Migration {
         return Plan(changes, made, skipped)
     }
 
+    /** Будущая задача, пока строки заметки ещё идут: подпункты долепляются к ней по ходу. */
+    private class Draft(
+        val title: String,
+        val path: String,
+        val done: Boolean,
+        val indent: Int,
+        val subtasks: MutableList<TaskFile.Subtask> = mutableListOf(),
+    )
+
     /** Одна заметка: чекбоксы её секции «Задачи» → файлы задач, строки → ссылки. */
     private fun migrate(
         path: String,
@@ -71,39 +89,54 @@ object Migration {
         date: LocalDate,
         taken: MutableSet<String>,
     ): Plan {
-        val changes = mutableListOf<BatchPlan.Change>()
-        val made = mutableListOf<Made>()
+        val drafts = mutableListOf<Draft>()
         var inTasks = false
+        var parent: Draft? = null
         val lines =
             text.split("\n").map { line ->
                 when {
                     HEADER.matches(line) -> {
                         inTasks = true
+                        parent = null
                         return@map line
                     }
-                    inTasks && closes(line) -> inTasks = false
+                    inTasks && closes(line) -> {
+                        inTasks = false
+                        parent = null
+                    }
                 }
-                val box = if (inTasks) CHECKBOX.find(line) else null
-                if (box == null) {
-                    line
-                } else {
-                    val title = box.groupValues[TITLE].trim()
-                    val done = box.groupValues[MARK] != " "
-                    val name = TaskFile.fileName(date, title, taken)
-                    val task = TaskFile.DIR + name
-                    taken += task
-                    changes += BatchPlan.Put(task, task(task, title, done, note, date))
-                    made += Made(path, title, task, done)
-                    // Заметка могла прийти с CRLF: `\s*$` шаблона съедает `\r`, и без возврата
-                    // на место в файле завелись бы смешанные переводы строк.
-                    val eol = if (line.endsWith("\r")) "\r" else ""
-                    "${box.groupValues[INDENT]}- [$title](../${TaskFile.DIR}$name)$eol"
-                }
+                val box = (if (inTasks) CHECKBOX.find(line) else null) ?: return@map line
+                val indent = box.groupValues[INDENT]
+                val title = box.groupValues[TITLE].trim()
+                val done = box.groupValues[MARK] != " "
+                // Вложеннее предыдущей задачи — это её подпункт; иначе новая задача, и её отступ
+                // становится уровнем «верха» (список секции мог быть сдвинут целиком).
+                val owner = parent?.takeIf { indent.length > it.indent }
+                val task =
+                    if (owner == null) {
+                        val name = TaskFile.fileName(date, title, taken)
+                        Draft(title, TaskFile.DIR + name, done, indent.length)
+                            .also { drafts += it }
+                            .also { parent = it }
+                            .also { taken += it.path }
+                    } else {
+                        owner.subtasks += TaskFile.Subtask(title, done)
+                        owner
+                    }
+                // Заметка могла прийти с CRLF: `\s*$` шаблона съедает `\r`, и без возврата
+                // на место в файле завелись бы смешанные переводы строк.
+                val eol = if (line.endsWith("\r")) "\r" else ""
+                "$indent- [$title](../${task.path})$eol"
             }
-        if (made.isEmpty()) return Plan(emptyList(), emptyList(), emptyList())
+        if (drafts.isEmpty()) return Plan(emptyList(), emptyList(), emptyList())
         // Заметка переписывается построчно: frontmatter и транскрипт не пересобираются вовсе
         // (решение LLD-9), меняются ровно строки чекбоксов.
-        return Plan(changes + BatchPlan.Put(path, lines.joinToString("\n")), made, emptyList())
+        return Plan(
+            drafts.map { BatchPlan.Put(it.path, task(it, note, date)) } +
+                BatchPlan.Put(path, lines.joinToString("\n")),
+            drafts.map { Made(path, it.title, it.path, it.done, it.subtasks.toList()) },
+            emptyList(),
+        )
     }
 
     /**
@@ -114,23 +147,34 @@ object Migration {
      * существовало, а выдумывать её ADR прямо запрещает («задача со `status: done` без поля `done`
      * показывается в конце секции без даты»).
      */
-    private fun task(
-        path: String,
-        title: String,
-        done: Boolean,
-        note: NoteFile.Note,
-        date: LocalDate,
-    ): String =
+    private fun task(draft: Draft, note: NoteFile.Note, date: LocalDate): String =
         TaskFile.build(
             TaskFile.Task(
-                path = path,
-                title = title,
-                status = if (done) TaskFile.STATUS_DONE else TaskFile.STATUS_OPEN,
+                path = draft.path,
+                title = draft.title,
+                status = if (draft.done) TaskFile.STATUS_DONE else TaskFile.STATUS_OPEN,
                 project = note.project,
                 source = note.path,
                 created = date,
+                body = body(draft.subtasks),
             )
         )
+
+    /**
+     * Подпункты заметки — секция «Подзадачи» тела задачи: формат под ADR не меняется, меняется
+     * только то, что миграция в него пишет. Заголовок берётся у [Edit] — того же, кто дописывает
+     * подзадачи из приложения, чтобы секция в файле была одна.
+     */
+    private fun body(subtasks: List<TaskFile.Subtask>): String =
+        if (subtasks.isEmpty()) {
+            ""
+        } else {
+            subtasks.joinToString(
+                separator = "\n",
+                prefix = Edit.SUBTASKS_HEADING + "\n",
+                transform = { "- [${if (it.done) "x" else " "}] ${it.text}" },
+            )
+        }
 
     /**
      * `inbox/` — вотчина Action (решение LLD-7), `tasks/` — уже v2, реестры не заметки. Публичный:

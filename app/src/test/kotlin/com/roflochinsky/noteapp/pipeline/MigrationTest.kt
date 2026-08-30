@@ -215,20 +215,71 @@ class MigrationTest {
     }
 
     /**
-     * Вложенный чекбокс становится отдельной задачей верхнего уровня, а не подзадачей родителя:
-     * родство задач миграция не переносит (заведено отдельно — `nikitatrubaev-0rk.28`). Текст при
-     * этом цел — отступ строки сохраняется, вложенность видна в самой заметке.
+     * Вложенный чекбокс становится подзадачей в файле родителя, а не сестринской задачей верхнего
+     * уровня (`nikitatrubaev-0rk.28`): формат это умеет — секция «## Подзадачи» внутри файла
+     * задачи. В заметке на месте подпункта — ссылка на файл родителя: текст цел, отступ на месте,
+     * вложенность видна, и клик ведёт туда, где этот подпункт живёт чекбоксом.
      */
     @Test
-    fun `вложенная подзадача — отдельная задача, но отступ строки цел`() {
+    fun `вложенный подпункт становится подзадачей в файле родителя`() {
         val path = "идеи/2026-08-12-a.md"
-        val body = "**Задачи.**\n- [ ] дело\n  - [ ] подпункт\n"
+        val body = "**Задачи.**\n- [ ] дело\n  - [x] подпункт\n"
         val plan = Migration.plan(mapOf(path to note(body = body)))
-        assertEquals(listOf("дело", "подпункт"), plan.made.map { it.title })
+        val parent = plan.made.single()
+        assertEquals("дело", parent.title)
+        assertEquals("tasks/2026-08-12-delo.md", parent.path)
+        assertEquals(listOf(TaskFile.Subtask("подпункт", true)), parent.subtasks)
+
+        val task = TaskFile.parse(parent.path, put(plan, parent.path))
+        assertEquals(listOf(TaskFile.Subtask("подпункт", true)), task.subtasks)
+        assertEquals(TaskFile.STATUS_OPEN, task.status)
+
+        val note = put(plan, path)
+        assertTrue(note, note.contains("\n- [дело](../tasks/2026-08-12-delo.md)"))
+        assertTrue(note, note.contains("\n  - [подпункт](../tasks/2026-08-12-delo.md)"))
+        assertTrue(plan.changes.map { it.path }.toString(), plan.changes.size == 2)
+    }
+
+    /**
+     * Третий уровень формат не обещает («подзадачи — чекбоксы внутри файла, **один уровень**», ADR
+     * и решение 1 спеки), поэтому он сплющивается в подзадачи той же задачи верхнего уровня, а не
+     * заводит свой файл: текст заметки цел, отступы на месте, вложенность видна в самой заметке.
+     */
+    @Test
+    fun `третий уровень сплющивается в подзадачи той же задачи, а не заводит свой файл`() {
+        val path = "идеи/2026-08-12-a.md"
+        val body = "**Задачи.**\n- [ ] дело\n  - [ ] подпункт\n    - [x] под-подпункт\n"
+        val plan = Migration.plan(mapOf(path to note(body = body)))
+        val parent = plan.made.single()
+        assertEquals(listOf("подпункт", "под-подпункт"), parent.subtasks.map { it.text })
+        assertEquals(listOf(false, true), parent.subtasks.map { it.done })
         assertTrue(
             put(plan, path),
-            put(plan, path).contains("\n  - [подпункт](../tasks/2026-08-12-podpunkt.md)"),
+            put(plan, path).contains("\n    - [под-подпункт](../tasks/2026-08-12-delo.md)"),
         )
+    }
+
+    /** Список секции мог быть сдвинут целиком — тогда родителя у первой строки нет. */
+    @Test
+    fun `секция начинается с отступа — это задача верхнего уровня, а не ничья подзадача`() {
+        val body = "**Задачи.**\n  - [ ] дело\n  - [ ] второе дело\n"
+        val plan = Migration.plan(mapOf("идеи/2026-08-12-a.md" to note(body = body)))
+        assertEquals(listOf("дело", "второе дело"), plan.made.map { it.title })
+        assertEquals(emptyList<TaskFile.Subtask>(), plan.made.flatMap { it.subtasks })
+    }
+
+    /**
+     * Идемпотентность на вложенности: ссылка подпункта ведёт в родителя и второй раз не читается.
+     */
+    @Test
+    fun `заметка с подпунктами не мигрирует повторно`() {
+        val path = "идеи/2026-08-12-a.md"
+        val body = "**Задачи.**\n- [ ] дело\n  - [ ] подпункт\n- [x] второе дело\n"
+        val files = mapOf(path to note(body = body))
+        val once = Migration.plan(files)
+        assertEquals(listOf("дело", "второе дело"), once.made.map { it.title })
+        val twice = Migration.plan(apply(files, once))
+        assertTrue(twice.changes.toString(), twice.isEmpty)
     }
 
     private fun put(plan: Migration.Plan, path: String): String =

@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -51,6 +52,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.roflochinsky.noteapp.pipeline.Registry
 import com.roflochinsky.noteapp.pipeline.TaskFile
 import java.time.Instant
 import java.time.LocalDate
@@ -291,8 +293,37 @@ data class NewTask(
 
 private enum class Picking {
     PROJECT,
+    NEW_PROJECT,
     PRIORITY,
     TAG,
+}
+
+/**
+ * Строка «Новый проект» из компа v2 (борд 2): плюс вместо радио, синим, а справа — куда это уедет.
+ * Обещание держит запись в реестр: имя уходит строкой в `projects.md` (`bd nikitatrubaev-0rk.23`).
+ * До этого среза свободного ввода не было вовсе — он рождал проект без реестра (пункт 26 плана).
+ */
+@Composable
+private fun NewProjectRow(onClick: () -> Unit) {
+    HorizontalDivider(color = DocPalette.Line)
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).height(TOUCH.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(
+            Icons.Filled.Add,
+            contentDescription = null,
+            tint = DocPalette.Blue,
+            modifier = Modifier.size(19.dp),
+        )
+        Text(
+            "Новый проект",
+            style = MaterialTheme.typography.bodyMedium.copy(color = DocPalette.Blue),
+            modifier = Modifier.weight(1f),
+        )
+        Text("запишется в ${Registry.PROJECTS}", style = MaterialTheme.typography.labelMedium)
+    }
 }
 
 /**
@@ -306,6 +337,7 @@ fun NewTaskSheet(
     today: LocalDate,
     taken: Set<String>,
     onDismiss: () -> Unit,
+    onNewProject: (String) -> Unit,
     onCreate: (NewTask) -> Unit,
 ) {
     var draft by remember { mutableStateOf(NewTask()) }
@@ -313,7 +345,7 @@ fun NewTaskSheet(
     var dueOpen by remember { mutableStateOf(false) }
     Sheet(onDismiss) {
         when (picking) {
-            Picking.PROJECT ->
+            Picking.PROJECT -> {
                 ChoiceRows(
                     choices = projects.map { Choice(it, it) } + Choice(null, "Без проекта"),
                     selected = draft.project,
@@ -322,6 +354,25 @@ fun NewTaskSheet(
                     draft = draft.copy(project = it)
                     picking = null
                 }
+                NewProjectRow { picking = Picking.NEW_PROJECT }
+            }
+            Picking.NEW_PROJECT -> {
+                var name by remember { mutableStateOf("") }
+                // Такой проект уже в реестре — берём его, а не заводим второй такой же: два
+                // одинаковых имени были бы двумя значениями чипа с одним смыслом.
+                val add = {
+                    Registry.name(name)?.let { entered ->
+                        val known = Registry.match(projects, entered)
+                        draft = draft.copy(project = known ?: entered)
+                        if (known == null) onNewProject(entered)
+                    }
+                    picking = null
+                }
+                SheetTitle("Новый проект")
+                InputBox(name, "как назвать", { name = it }) { add() }
+                Box(Modifier.height(12.dp))
+                Cta("Добавить", name.isNotBlank()) { add() }
+            }
             Picking.PRIORITY ->
                 ChoiceRows(
                     choices = TaskFilter.PRIORITIES.map { Choice(it, "$it · ${priorityWord(it)}") },
