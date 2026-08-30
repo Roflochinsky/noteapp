@@ -97,6 +97,10 @@ class RepoStore(
         val notice: String?,
         /** Значения чипа «Проект» — из реестра `projects.md`, а не из проставленного в задачах. */
         val projects: List<String> = emptyList(),
+        /** Заметки репо: вторая половина ленты, склеиваемая с записями по [NoteRef] (LLD-11). */
+        val notes: List<NoteFile.Note> = emptyList(),
+        /** Значения чипа «Персона» и выбора участников — из реестра `people.md`. */
+        val people: List<String> = emptyList(),
     )
 
     fun view(): View {
@@ -104,10 +108,16 @@ class RepoStore(
         val snapshot = snapshot
         return View(
             revision = revision(ops),
-            tasks = overlay(ops, snapshot).map { (path, text) -> TaskFile.parse(path, text) },
+            tasks =
+                overlay(ops, snapshot, ::isTask).map { (path, text) -> TaskFile.parse(path, text) },
             pending = ops.map { it.path }.toSet(),
             notice = takeDivergence(),
             projects = Registry.names(snapshot.files[Registry.PROJECTS]?.text),
+            notes =
+                overlay(ops, snapshot, NoteRef::isNote).mapNotNull { (path, text) ->
+                    NoteFile.parse(path, text)
+                },
+            people = Registry.names(snapshot.files[Registry.PEOPLE]?.text),
         )
     }
 
@@ -218,7 +228,7 @@ class RepoStore(
             val known = snapshot.files
             val files =
                 tree
-                    .filterKeys { isTask(it) || it in REGISTRIES }
+                    .filterKeys { isTask(it) || NoteRef.isNote(it) || it in REGISTRIES }
                     .mapValues { (path, sha) ->
                         // Путь с ожидающей правкой не перечитываем: кэш держит базу слияния.
                         known[path]?.takeIf { it.sha == sha || path in waiting }
@@ -414,10 +424,11 @@ class RepoStore(
     private fun overlay(
         ops: List<WriteQueue.Op>,
         snapshot: RepoCache.Snapshot,
+        mine: (String) -> Boolean,
     ): Map<String, String> {
         val texts = LinkedHashMap<String, String>()
-        snapshot.files.filterKeys { isTask(it) }.forEach { (path, e) -> texts[path] = e.text }
-        ops.filter { isTask(it.path) }
+        snapshot.files.filterKeys(mine).forEach { (path, e) -> texts[path] = e.text }
+        ops.filter { mine(it.path) }
             .forEach { op ->
                 when (val edit = op.edit) {
                     Edit.DeleteFile -> texts.remove(op.path)
@@ -433,10 +444,11 @@ class RepoStore(
 
     private fun message(op: WriteQueue.Op): String {
         val name = op.path.substringAfterLast('/')
+        val what = if (NoteRef.isNote(op.path)) "заметки" else "задачи"
         return when (op.edit) {
             is Edit.CreateTask -> "Новая задача $name"
             Edit.DeleteFile -> "Удалена задача $name"
-            else -> "Правка задачи $name"
+            else -> "Правка $what $name"
         }
     }
 

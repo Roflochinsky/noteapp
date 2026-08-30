@@ -60,7 +60,7 @@ fun SectionTabs(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (query != null && onQuery != null) {
-            SearchField(query, onQuery, Modifier.weight(1f))
+            SearchField(query, onQuery, hint(active), Modifier.weight(1f))
             IconButton(onClick = { onQuery(null) }) {
                 Icon(Icons.Filled.Close, "Закрыть поиск", tint = DocPalette.Mut)
             }
@@ -91,12 +91,21 @@ fun SectionTabs(
     }
 }
 
+/** Подсказка поля называет раздел: лупа одна, а ищет она в том списке, который открыт. */
+private fun hint(active: Tab): String =
+    if (active == Tab.NOTES) "Поиск по заметкам" else "Поиск по задачам"
+
 /**
  * Строка поиска компа: контур 1px `line`, радиус 12dp, лупа и текст `mut` (DESIGN.md, Inputs).
  * Клавиатура поднимается сама — иначе тап по лупе даёт поле, в которое ещё надо попасть пальцем.
  */
 @Composable
-private fun SearchField(query: String, onQuery: (String?) -> Unit, modifier: Modifier) {
+private fun SearchField(
+    query: String,
+    onQuery: (String?) -> Unit,
+    hint: String,
+    modifier: Modifier,
+) {
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
     Row(
@@ -116,7 +125,7 @@ private fun SearchField(query: String, onQuery: (String?) -> Unit, modifier: Mod
         )
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
             if (query.isEmpty()) {
-                Text("Поиск по задачам", style = MaterialTheme.typography.bodyMedium)
+                Text(hint, style = MaterialTheme.typography.bodyMedium)
             }
             BasicTextField(
                 value = query,

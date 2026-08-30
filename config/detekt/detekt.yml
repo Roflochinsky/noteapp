@@ -20,6 +20,8 @@ complexity:
       - '**/ui/TaskSheets.kt'
       - '**/ui/TaskDetailScreen.kt'
       - '**/ui/TasksScreen.kt'
+      - '**/ui/DetailScreen.kt'
+      - '**/ui/FeedScreen.kt'
   LongMethod:
     ignoreAnnotated: ['Composable']
   CyclomaticComplexMethod:

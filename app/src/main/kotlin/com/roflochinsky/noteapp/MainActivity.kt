@@ -29,7 +29,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import com.roflochinsky.noteapp.pipeline.GithubClient
+import com.roflochinsky.noteapp.pipeline.NoteFile
+import com.roflochinsky.noteapp.pipeline.NoteRef
 import com.roflochinsky.noteapp.pipeline.NotesStore
+import com.roflochinsky.noteapp.pipeline.PipelineQueue
 import com.roflochinsky.noteapp.pipeline.RepoStore
 import com.roflochinsky.noteapp.pipeline.RepoWriteWorker
 import com.roflochinsky.noteapp.pipeline.Settings
@@ -61,7 +64,8 @@ class MainActivity : ComponentActivity() {
         /** Вкладка — часть состояния экрана: Back с «Задач» возвращает на «Заметки». */
         data class Feed(val tab: Tab = Tab.NOTES) : Screen
 
-        data class Detail(val noteId: String) : Screen
+        /** Заметка открывается по ref склейки: у неё может не быть ни записи, ни файла в репо. */
+        data class Detail(val ref: String) : Screen
 
         data class Task(val path: String) : Screen
     }
@@ -71,6 +75,8 @@ class MainActivity : ComponentActivity() {
     private var tasks by mutableStateOf(listOf<TaskFile.Task>())
     private var pendingPaths by mutableStateOf(emptySet<String>())
     private var registry by mutableStateOf(listOf<String>())
+    private var repoNotes by mutableStateOf(listOf<NoteFile.Note>())
+    private var people by mutableStateOf(listOf<String>())
     private var revision = ""
     private var notice by mutableStateOf<String?>(null)
     private var newTaskOpen by mutableStateOf(false)
@@ -130,12 +136,19 @@ class MainActivity : ComponentActivity() {
                 when (s.tab) {
                     Tab.NOTES ->
                         FeedScreen(
-                            notes = notes,
+                            feed = feed(),
+                            people = people,
+                            projects = projects(),
+                            today = LocalDate.now(),
                             isRecording = recording,
                             tasksCount = TaskFilter.openCount(tasks),
                             sync = sync,
+                            refreshing = refreshing,
+                            notice = notice,
+                            onNotice = { notice = null },
                             onTab = { screen = Screen.Feed(it) },
                             onNote = { screen = Screen.Detail(it) },
+                            onRefresh = { scope.launch { refreshRepo() } },
                             onRecord = ::onRecord,
                             onSettings = { screen = Screen.Onboarding },
                         )
@@ -164,8 +177,31 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             is Screen.Detail -> {
-                BackHandler { screen = Screen.Feed() }
-                DetailScreen(noteId = s.noteId, onBack = { screen = Screen.Feed() })
+                val back = { screen = Screen.Feed() }
+                BackHandler { back() }
+                val item = feed().firstOrNull { it.ref == s.ref }
+                if (item == null) {
+                    // Заметку унесло обновлением (Action перенёс, владелец удалил) — уходим на
+                    // ленту эффектом: писать в state прямо в теле композиции нельзя.
+                    LaunchedEffect(s.ref) { back() }
+                } else {
+                    DetailScreen(
+                        item = item,
+                        people = people,
+                        projects = projects(),
+                        tasks = tasks,
+                        pending = item.path in pendingPaths,
+                        onEdit = { edit ->
+                            item.path?.let { write(scope) { s -> s.edit(it, edit) } }
+                        },
+                        onOpen = ::openInGithub,
+                        onTask = { screen = Screen.Task(it) },
+                        onRetry = {
+                            item.noteId?.let { PipelineQueue.enqueue(this@MainActivity, it) }
+                        },
+                        onBack = back,
+                    )
+                }
             }
             is Screen.Task -> {
                 val back = { screen = Screen.Feed(Tab.TASKS) }
@@ -236,6 +272,10 @@ class MainActivity : ComponentActivity() {
      * компе), следом — проекты, которые уже стоят в задачах, но в реестр ещё не попали. Задача с
      * незнакомым проектом иначе выпала бы и из фильтра, и из выбора в деталке.
      */
+    /** Лента — записи телефона ∪ заметки из кэша репо, склеенные по `NoteRef` (решение LLD-11). */
+    private fun feed(): List<com.roflochinsky.noteapp.pipeline.FeedItem> =
+        NoteRef.merge(notes, repoNotes)
+
     private fun projects(): List<String> =
         (registry + tasks.mapNotNull { it.project }.sorted()).distinct()
 
@@ -276,6 +316,8 @@ class MainActivity : ComponentActivity() {
         tasks = fresh.tasks
         pendingPaths = fresh.pending
         registry = fresh.projects
+        repoNotes = fresh.notes
+        people = fresh.people
         fresh.notice?.let { notice = it }
     }
 
