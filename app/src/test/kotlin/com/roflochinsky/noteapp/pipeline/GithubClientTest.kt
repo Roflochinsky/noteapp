@@ -3,6 +3,7 @@ package com.roflochinsky.noteapp.pipeline
 import java.io.IOException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -12,7 +13,8 @@ import org.junit.Test
  * вместо непроверяемого object) — сети в гейте нет, живое чтение остаётся за `RepoSmokeTest`.
  *
  * Чего здесь нет и почему: ответ `git/blobs` в фикстурах не снят, а сочинять json нельзя — разбор
- * `readBlob` пока держит только смоук; `compare-ahead.json` ждёт своего метода в срезе Н7.
+ * `readBlob` пока держит только смоук. Разбор `compare-ahead.json` в дельту живёт в [RepoDeltaTest]
+ * — здесь проверяется только адрес запроса и то, что ответ доезжает до разбора.
  */
 class GithubClientTest {
 
@@ -24,15 +26,22 @@ class GithubClientTest {
         checkNotNull(javaClass.getResource("/github/$name.json")) { "нет фикстуры $name.json" }
             .readText()
 
-    private fun client(answer: (String) -> String) =
-        GithubClient(
+    /**
+     * Оба шва чтения ведут в одну функцию ответа: ветку клиент читает условным запросом всегда, а
+     * безусловность — это пустой ETag, не второй путь.
+     */
+    private fun client(answer: (String) -> String): GithubClient {
+        val get: (String) -> String = { url ->
+            asked += url
+            answer(url)
+        }
+        return GithubClient(
             repo,
             "ghp_v-test-ne-uhodit",
-            fetch = { url ->
-                asked += url
-                answer(url)
-            },
+            fetch = get,
+            conditional = { url, _ -> Fetched(get(url), null) },
         )
+    }
 
     @Test
     fun `sha ветки берётся из настоящего ответа git-ref`() {
@@ -85,6 +94,47 @@ class GithubClientTest {
                 "https://api.github.com/repos/$repo/git/trees/$commit?recursive=1",
             ),
             asked,
+        )
+    }
+
+    /**
+     * Условный опрос ветки (research §3.2): наш ETag уходит в запрос, свежий приходит обратно и
+     * ложится в кэш — иначе следующий опрос снова платный.
+     */
+    @Test
+    fun `условный опрос ветки отдаёт sha и свежий ETag`() {
+        val sent = mutableListOf<String?>()
+        val client =
+            GithubClient(
+                repo,
+                "ghp_v-test-ne-uhodit",
+                conditional = { url, etag ->
+                    asked += url
+                    sent += etag
+                    Fetched(fixture("ref"), "\"свежий\"")
+                },
+            )
+        assertEquals(Ref(commit, "\"свежий\""), client.readRef("\"прошлый\""))
+        assertEquals(listOf("https://api.github.com/repos/$repo/git/ref/heads/main"), asked)
+        assertEquals(listOf("\"прошлый\""), sent)
+    }
+
+    /** 304 — ветка не двигалась и квота не потрачена: разбирать нечего, наверх идёт `null`. */
+    @Test
+    fun `ответ 304 отдаётся как отсутствие изменений`() {
+        val client = GithubClient(repo, "ghp_v-test-ne-uhodit", conditional = { _, _ -> null })
+        assertNull(client.readRef("\"прошлый\""))
+    }
+
+    /** `compare` берёт два голых SHA (research §6.C, проверено живым запросом). */
+    @Test
+    fun `compare спрашивается по двум sha и разбирается в дельту`() {
+        val head = "9f1c0b2e2d5a4f0c8b7a6d5e4f3c2b1a09876543"
+        val delta = client { fixture("compare-ahead") }.compare(commit, head)
+        assertEquals("https://api.github.com/repos/$repo/compare/$commit...$head", asked.single())
+        assertEquals(
+            "fb52d8f63b29094655138c567093200d4f226a84",
+            delta.changed["tasks/2026-08-25-fix-retraev-ocheredi.md"],
         )
     }
 

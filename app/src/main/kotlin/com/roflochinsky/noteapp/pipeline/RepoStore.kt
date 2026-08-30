@@ -21,8 +21,9 @@ enum class SyncStatus {
  * галочка не отскакивает и офлайн работает сам собой. Отправку ведёт [push] — по одной операции за
  * вызов, паузу между мутациями держит воркер (research §3.3).
  *
- * ponytail: чтение полное (ref + tree + изменившиеся блобы) — репо личное и маленькое; ETag,
- * `compare` и дельта живут в срезе Н7, раньше они экономят то, чего никто не тратит.
+ * Обновление дешёвое (срез Н7): условный опрос ветки, `304` — и квота не потрачена вовсе; ветка
+ * сдвинулась — один `compare` вместо всего дерева, тексты дочитываются только у файлов с
+ * изменившимся blob-SHA. Ручное обновление спрашивает безусловно.
  */
 @Suppress("TooManyFunctions") // разделение фасада и отправки — bd nikitatrubaev-0rk.14
 class RepoStore(
@@ -218,22 +219,31 @@ class RepoStore(
      * вызовами [push], то есть вне замка.
      */
     @Synchronized
-    fun refresh(): SyncStatus {
+    fun refresh(force: Boolean = false): SyncStatus {
         val api = api ?: return SyncStatus.NO_TOKEN
         return try {
-            val commit = api.readRef()
-            val tree = api.readTree(commit)
-            val waiting = queue.pending().map { it.path }.toSet()
-            val known = snapshot.files
-            val files =
-                tree
-                    .filterKeys { isTask(it) || it in REGISTRIES }
-                    .mapValues { (path, sha) ->
-                        // Путь с ожидающей правкой не перечитываем: кэш держит базу слияния.
-                        known[path]?.takeIf { it.sha == sha || path in waiting }
-                            ?: RepoCache.Entry(sha, api.readBlob(sha))
-                    }
-            cache.save(RepoCache.Snapshot(commit, files))
+            val was = snapshot
+            // Ручное обновление спрашивает безусловно — это РЕШЕНИЕ среза Н7, а не обход
+            // технического незнания: владелец, дёрнувший экран вниз, обязан получить свежее
+            // состояние, а не «у нас записано, что не менялось». Прежняя формулировка ссылалась
+            // на непроверенное поведение ETag за CDN — оговорка снята замером 2026-08-30
+            // (`git/ref` отдаёт `cache-control: private, max-age=60`, общего CDN-кэша нет,
+            // 200 приходит сразу после чужого коммита), см. research §10.2.
+            val ref = api.readRef(was.etag.takeUnless { force })
+            when {
+                // 304: ветка не двигалась, квота не потрачена, читать нечего.
+                ref == null -> Unit
+                // Ветка там же, где была, а 304 не пришёл — ETag у нас был пустой или сменился.
+                // Тексты перечитывать не из чего, запоминаем ключ на следующий раз.
+                ref.sha == was.commitSha -> cache.save(was.copy(etag = ref.etag.orEmpty()))
+                else -> {
+                    val delta =
+                        was.commitSha.takeIf { it.isNotEmpty() }?.let { delta(api, it, ref.sha) }
+                    val files =
+                        if (delta == null) rebuilt(api, ref.sha, was) else applied(api, delta, was)
+                    cache.save(RepoCache.Snapshot(ref.sha, files, ref.etag.orEmpty()))
+                }
+            }
             SyncStatus.OK
         } catch (e: GithubHttpException) {
             status(e)
@@ -244,6 +254,65 @@ class RepoStore(
             SyncStatus.OFFLINE
         }
     }
+
+    /**
+     * Что изменилось с прошлого раза — один запрос вместо всего дерева (research §6.C). `null`
+     * значит «картины нет»: `compare` усечён, ветки разошлись или GitHub ответил отказом (базовый
+     * коммит мог уже исчезнуть из репо). Тогда карта пересобирается через `trees` — решение LLD-21.
+     * Сетевые обрывы сюда не относятся: они улетают наверх и становятся статусом.
+     */
+    private fun delta(api: GithubApi, base: String, head: String): RepoDelta? =
+        try {
+            api.compare(base, head).takeUnless { it.stale }
+        } catch (@Suppress("SwallowedException") e: GithubHttpException) {
+            null
+        }
+
+    /** Дельта поверх карты кэша: убрать унесённое, дочитать только то, чего у нас нет. */
+    private fun applied(
+        api: GithubApi,
+        delta: RepoDelta,
+        was: RepoCache.Snapshot,
+    ): Map<String, RepoCache.Entry> {
+        val texts = texts(api, was)
+        val changed =
+            delta.changed.filterKeys { keep(it) }.mapValues { (path, sha) -> texts(path, sha) }
+        return was.files - delta.removed + changed
+    }
+
+    /** Пересбор карты с нуля — те же тексты из кэша, дочитывается только изменившееся. */
+    private fun rebuilt(
+        api: GithubApi,
+        commit: String,
+        was: RepoCache.Snapshot,
+    ): Map<String, RepoCache.Entry> {
+        val texts = texts(api, was)
+        return api.readTree(commit)
+            .filterKeys { keep(it) }
+            .mapValues { (path, sha) -> texts(path, sha) }
+    }
+
+    /**
+     * Откуда взять текст файла с данным blob-SHA, от дешёвого к дорогому: он уже лежит по этому
+     * пути; он лежит по другому пути (Action переименовал файл — blob тот же, читать нечего); путь
+     * ждёт отправки, и его запись в кэше — база слияния, перечитывать её нельзя (решение LLD-1).
+     * Только если не подошло ничего — `git/blobs`.
+     */
+    private fun texts(
+        api: GithubApi,
+        was: RepoCache.Snapshot,
+    ): (String, String) -> RepoCache.Entry {
+        val waiting = queue.pending().map { it.path }.toSet()
+        val bySha = was.files.values.associateBy { it.sha }
+        return { path, sha ->
+            was.files[path]?.takeIf { it.sha == sha || path in waiting }
+                ?: bySha[sha]
+                ?: RepoCache.Entry(sha, api.readBlob(sha))
+        }
+    }
+
+    /** В кэше живут задачи и реестры — остальное дерево приложению не нужно. */
+    private fun keep(path: String): Boolean = isTask(path) || path in REGISTRIES
 
     /**
      * Одна операция за вызов: паузу в секунду между мутациями держит воркер (research §4).
