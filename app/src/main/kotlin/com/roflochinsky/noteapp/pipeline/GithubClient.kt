@@ -18,6 +18,8 @@ import org.json.JSONObject
  *   фикстуры. Разбор ответа так проверяется без сети (решение HLD про `HttpTransport`).
  * @param write тот же шов для мутаций (метод, URL, тело): без него цепочка батча — пять запросов и
  *   пересборка на 422 — проверялась бы только живой сетью.
+ * @param conditional шов условного GET (URL и наш ETag): отдельный от [fetch], потому что здесь
+ *   важны заголовки в обе стороны и код 304, а не только тело.
  */
 class GithubClient(
     private val repo: String,
@@ -26,10 +28,23 @@ class GithubClient(
     private val write: (String, String, String) -> String = { method, url, body ->
         httpSend(method, url, body, token)
     },
+    private val conditional: (String, String?) -> Fetched? = { url, etag ->
+        httpGetIfChanged(url, etag, token)
+    },
 ) : GithubApi {
 
-    override fun readRef(): String =
-        JSONObject(fetch("$API/$repo/git/ref/heads/main")).getJSONObject("object").getString("sha")
+    /**
+     * Ветку читает только этот метод — безусловный вызов (батч, `findDonePath`) отличается от
+     * поллинга ровно пустым [etag], а не вторым путём в бою.
+     */
+    override fun readRef(etag: String?): Ref? =
+        conditional("$API/$repo/git/ref/heads/main", etag)?.let {
+            Ref(JSONObject(it.body).getJSONObject("object").getString("sha"), it.etag)
+        }
+
+    /** Голые SHA `compare` принимает — проверено живым запросом (research §6.C). */
+    override fun compare(base: String, head: String): RepoDelta =
+        RepoDelta.parse(fetch("$API/$repo/compare/$base...$head"))
 
     override fun readTree(commitSha: String): Map<String, String> {
         val tree =
@@ -100,14 +115,16 @@ class GithubClient(
         )
     }
 
-    /** Ответы GitHub приходят с переносами строк; кодировка задана явно — в репо кириллица. */
-    private fun decode(base64: String): String =
-        String(Base64.getMimeDecoder().decode(base64), Charsets.UTF_8)
-
     private companion object {
         const val API = "https://api.github.com/repos"
+
+        /** Ответы GitHub приходят с переносами строк; кодировка задана явно — в репо кириллица. */
+        fun decode(base64: String): String =
+            String(Base64.getMimeDecoder().decode(base64), Charsets.UTF_8)
+
         const val TIMEOUT_MS = 60_000
         const val ERR_PREVIEW = 300
+        const val HTTP_NOT_MODIFIED = 304
 
         /**
          * Отказ `PATCH ref` с `force: false`. Research перечисляет у него 200, 409 и 422; оба
@@ -119,6 +136,29 @@ class GithubClient(
         /** Попытка плюс ровно одна пересборка на 422 — больше миграция не догоняет. */
         const val ATTEMPTS = 2
         val SUCCESS_RANGE = 200..299
+
+        /**
+         * Условный GET: наш ETag уходит заголовком `If-None-Match`, ответ `304` возвращается как
+         * `null`. Проверку кода [check] здесь звать нельзя — она бы приняла 304 за отказ, хотя это
+         * штатный и самый желанный ответ поллинга (research §3.2).
+         */
+        @Throws(IOException::class)
+        fun httpGetIfChanged(url: String, etag: String?, token: String): Fetched? {
+            val conn = open(url, token)
+            try {
+                etag
+                    ?.takeIf { it.isNotEmpty() }
+                    ?.let { conn.setRequestProperty("If-None-Match", it) }
+                if (conn.responseCode == HTTP_NOT_MODIFIED) return null
+                check(conn)
+                return Fetched(
+                    conn.inputStream.bufferedReader().readText(),
+                    conn.getHeaderField("ETag"),
+                )
+            } finally {
+                conn.disconnect()
+            }
+        }
 
         @Throws(IOException::class)
         fun httpGet(url: String, token: String): String {
@@ -182,3 +222,6 @@ class GithubClient(
             path.split("/").joinToString("/") { URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
     }
 }
+
+/** Ответ условного GET: тело и свежий ETag на следующий раз. `null` вместо него — ответ 304. */
+data class Fetched(val body: String, val etag: String?)

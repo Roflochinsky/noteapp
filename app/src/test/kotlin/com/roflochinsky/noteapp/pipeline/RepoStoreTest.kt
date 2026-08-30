@@ -45,6 +45,9 @@ class RepoStoreTest {
             put("projects.md", "- tgsum — суммаризатор")
         }
 
+    private fun priority(store: RepoStore, title: String): String? =
+        store.view().tasks.firstOrNull { it.title == title }?.priority
+
     private fun store(dir: java.io.File, api: GithubApi?) =
         RepoStore(RepoCache(dir, repo, "ghp_test"), api)
 
@@ -88,6 +91,116 @@ class RepoStoreTest {
         api.remove("tasks/2026-08-20-razobrat-foto.md")
         store.refresh()
         assertEquals(listOf("P3"), store.view().tasks.map { it.priority })
+    }
+
+    /**
+     * Демо среза Н7: два обновления подряд без чужих коммитов. Второе уходит условным запросом,
+     * получает 304 — и это единственный ответ GitHub, который не тратит квоту вообще (research
+     * §3.2). Ни дерева, ни `compare`, ни блобов после него быть не должно.
+     */
+    @Test
+    fun `второе обновление подряд не тратит квоту`() {
+        val dir = tmp.newFolder()
+        val api = api()
+        val store = store(dir, api)
+        assertEquals(SyncStatus.OK, store.refresh())
+        val blobs = api.readBlobCalls
+        val trees = api.readTreeCalls
+        assertEquals(SyncStatus.OK, store.refresh())
+        assertEquals("второй опрос обязан прийти 304", 1, api.notModifiedCalls)
+        assertEquals("после 304 дерево не читают", trees, api.readTreeCalls)
+        assertEquals("после 304 блобы не читают", blobs, api.readBlobCalls)
+        assertEquals("после 304 сравнивать нечего", 0, api.compareCalls)
+    }
+
+    /** Ветка сдвинулась — разбор одним `compare`, дочитан ровно изменившийся файл. */
+    @Test
+    fun `после чужого коммита дочитывается только изменившийся файл`() {
+        val dir = tmp.newFolder()
+        val api = api()
+        val store = store(dir, api)
+        store.refresh()
+        val blobs = api.readBlobCalls
+        val trees = api.readTreeCalls
+        api.put("tasks/2026-08-25-fix-retraev-ocheredi.md", fix.replace("P1", "P3"))
+        assertEquals(SyncStatus.OK, store.refresh())
+        assertEquals("разбор идёт через compare", 1, api.compareCalls)
+        assertEquals("дерево при живом compare не нужно", trees, api.readTreeCalls)
+        assertEquals("дочитан ровно один файл", blobs + 1, api.readBlobCalls)
+        assertEquals("P3", priority(store, "Фикс ретраев очереди"))
+    }
+
+    /** Файл убрали чужим коммитом — уходит из списка через ту же дельту, без пересбора. */
+    @Test
+    fun `удалённый чужим коммитом файл пропадает по дельте`() {
+        val dir = tmp.newFolder()
+        val api = api()
+        val store = store(dir, api)
+        store.refresh()
+        api.remove("tasks/2026-08-20-razobrat-foto.md")
+        assertEquals(SyncStatus.OK, store.refresh())
+        assertEquals(listOf("Фикс ретраев очереди"), store.view().tasks.map { it.title })
+    }
+
+    /**
+     * Action переложил файл: текст тот же, blob-SHA тот же — читать нечего, запись просто
+     * переезжает на новый путь. Так же выглядит и пара `removed` + `added`, которой GitHub иногда
+     * заменяет `renamed` (вердикт HLD).
+     */
+    @Test
+    fun `переименование не стоит ни одного чтения`() {
+        val dir = tmp.newFolder()
+        val api = api()
+        val store = store(dir, api)
+        store.refresh()
+        val blobs = api.readBlobCalls
+        api.remove("tasks/2026-08-25-fix-retraev-ocheredi.md")
+        api.put("tasks/2026-08-25-fix-retraev-ocheredi-2.md", fix)
+        assertEquals(SyncStatus.OK, store.refresh())
+        assertEquals("текст берётся по blob-sha из кэша", blobs, api.readBlobCalls)
+        assertEquals(
+            listOf(
+                "tasks/2026-08-20-razobrat-foto.md",
+                "tasks/2026-08-25-fix-retraev-ocheredi-2.md",
+            ),
+            store.view().tasks.map { it.path }.sorted(),
+        )
+    }
+
+    /**
+     * `compare` картины не дал (усечение свыше 300 файлов или разошедшиеся ветки) — карта
+     * пересобирается через `trees`, но тексты всё равно дочитываются только у изменившихся (решение
+     * LLD-21).
+     */
+    @Test
+    fun `усечённый compare — пересбор через дерево, дочитывается только изменившееся`() {
+        val dir = tmp.newFolder()
+        val api = api()
+        val store = store(dir, api)
+        store.refresh()
+        val blobs = api.readBlobCalls
+        val trees = api.readTreeCalls
+        api.compareStale = true
+        api.put("tasks/2026-08-25-fix-retraev-ocheredi.md", fix.replace("P1", "P3"))
+        assertEquals(SyncStatus.OK, store.refresh())
+        assertEquals("пересбор идёт через дерево", trees + 1, api.readTreeCalls)
+        assertEquals("дочитан ровно один файл", blobs + 1, api.readBlobCalls)
+        assertEquals("P3", priority(store, "Фикс ретраев очереди"))
+    }
+
+    /**
+     * Ручное обновление — всегда безусловный запрос: поведение ETag на `git/ref` через CDN не
+     * проверено, а владелец, дёрнувший экран вниз, обязан увидеть свежее состояние (граница Н7).
+     */
+    @Test
+    fun `ручное обновление спрашивает репо безусловно`() {
+        val dir = tmp.newFolder()
+        val api = api()
+        val store = store(dir, api)
+        store.refresh()
+        assertEquals(SyncStatus.OK, store.refresh(force = true))
+        assertEquals("304 на ручном обновлении быть не должно", 0, api.notModifiedCalls)
+        assertEquals(2, store.view().tasks.size)
     }
 
     @Test
