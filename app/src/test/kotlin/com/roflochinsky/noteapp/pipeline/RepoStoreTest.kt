@@ -106,7 +106,12 @@ class RepoStoreTest {
         assertEquals(SyncStatus.OK, store.refresh())
         val blobs = api.readBlobCalls
         val trees = api.readTreeCalls
+        val refs = api.readRefCalls
         assertEquals(SyncStatus.OK, store.refresh())
+        // Главное обещание среза: опрос ровно один. Без этой строки код, который получил 304 и
+        // следом сходил за веткой платно, выглядел бы зелёным — все остальные счётчики он не
+        // двигает.
+        assertEquals("второе обновление — ровно один опрос ветки", refs + 1, api.readRefCalls)
         assertEquals("второй опрос обязан прийти 304", 1, api.notModifiedCalls)
         assertEquals("после 304 дерево не читают", trees, api.readTreeCalls)
         assertEquals("после 304 блобы не читают", blobs, api.readBlobCalls)

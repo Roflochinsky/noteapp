@@ -68,7 +68,13 @@ class RepoSmokeTest {
         assertEquals(SyncStatus.OK, store.refresh())
         val after = used(token)
         println("СМОУК ETag · x-ratelimit-used до второго обновления: $warm, после: $after")
-        assertEquals("второе обновление обязано быть бесплатным", warm, after)
+        // Счётчик общий на весь токен (research §3.1): смоук соседнего дерева агента двигает его
+        // нам под руку, и голое равенство было бы лотереей. Расхождение переспрашиваем ещё одним
+        // таким же обновлением — два совпадения подряд на чужой трафик уже не спишешь.
+        if (after != warm) {
+            val again = cost(store, token)
+            assertEquals("второе обновление обязано быть бесплатным ($warm → $after)", 0, again)
+        }
 
         // Репо тестовое и общее: параллельный смоук записи мог сдвинуть ветку — тогда 200 честный,
         // и проверяем на свежем ключе. Второй раз подряд такое совпадение уже не случайность.
@@ -89,13 +95,25 @@ class RepoSmokeTest {
         assertEquals(SyncStatus.OK, store.refresh(force = true))
         val delta = used(token) - moved
         println("СМОУК дельты · обновление после чужого коммита стоило $delta запроса (было 10)")
-        assertEquals("опрос ветки + compare + ровно один блоб", DELTA_BUDGET, delta)
+        assertEquals(
+            "опрос ветки + compare + ровно один блоб; счётчик общий на токен — чужой смоук в " +
+                "соседнем дереве завышает эту цифру, тогда прогон повторить в одиночку",
+            DELTA_BUDGET,
+            delta,
+        )
         val task = store.view().tasks.single { it.path == path }
         println("СМОУК дельты · дочитана только новая задача: ${task.title}")
 
         store.delete(path)
         while (store.push() == RepoStore.Push.MORE) Unit
         println("СМОУК дельты · $path удалён, репо в исходном состоянии")
+    }
+
+    /** Во сколько запросов основного лимита обошлось ещё одно обновление. */
+    private fun cost(store: RepoStore, token: String): Int {
+        val before = used(token)
+        store.refresh()
+        return used(token) - before
     }
 
     /** Ветку сдвинули между замерами — переспрашиваем один раз на свежем ключе. */

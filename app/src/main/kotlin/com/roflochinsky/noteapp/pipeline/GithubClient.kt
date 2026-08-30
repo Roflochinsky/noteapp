@@ -160,16 +160,17 @@ class GithubClient(
             }
         }
 
+        /**
+         * Безусловное чтение — это условное с пустым ключом, а не второй путь в бою (KDoc
+         * [readRef]). Без ключа `If-None-Match` не уходит, 304 прийти неоткуда — `null` здесь
+         * означал бы, что GitHub нарушил RFC 9110 §15.4.5.
+         */
         @Throws(IOException::class)
-        fun httpGet(url: String, token: String): String {
-            val conn = open(url, token)
-            try {
-                check(conn)
-                return conn.inputStream.bufferedReader().readText()
-            } finally {
-                conn.disconnect()
-            }
-        }
+        fun httpGet(url: String, token: String): String =
+            checkNotNull(httpGetIfChanged(url, etag = null, token = token)) {
+                    "304 на запрос без If-None-Match"
+                }
+                .body
 
         /**
          * Мутация с телом: тот же путь, что был у одиночного PUT, — общий на contents и git data.

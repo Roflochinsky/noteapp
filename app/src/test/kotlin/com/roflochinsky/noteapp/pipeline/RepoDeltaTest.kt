@@ -66,6 +66,19 @@ class RepoDeltaTest {
     }
 
     /**
+     * Тот же пересбор — и когда сломан не весь ответ, а одна запись `files`: без `sha` карту кэша
+     * обновить нечем. Исключение отсюда `delta()` не ловит (там только `GithubHttpException`), оно
+     * приземляется в широкий `catch` в `refresh()` — и владелец видит «нет сети» вместо пересбора
+     * через `trees`, а ветка не двигается.
+     */
+    @Test
+    fun `запись без blob-sha — пересбор, а не падение`() {
+        val root = JSONObject(fixture)
+        root.getJSONArray("files").getJSONObject(0).remove("sha")
+        assertTrue(RepoDelta.parse(root.toString()).stale)
+    }
+
+    /**
      * `removed` + `added` вместо `renamed` — второй вид переименования (вердикт HLD). Собирается из
      * настоящих записей фикстуры: у переименования отрывается `previous_filename`, а старый путь
      * приходит отдельной записью `removed`.

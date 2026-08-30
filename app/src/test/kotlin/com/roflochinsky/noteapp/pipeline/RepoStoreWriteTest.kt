@@ -119,6 +119,27 @@ class RepoStoreWriteTest {
         assertEquals(2, store.view().tasks.size)
     }
 
+    /**
+     * Инвариант LLD-1: путь, ждущий отправки, обновление в кэше не трогает — его запись и есть база
+     * слияния. Чужой коммит (Action с саммари) в ТОТ ЖЕ путь базу бы затёр, следующая отправка ушла
+     * бы PUT-ом со свежим sha, 409 не случилось бы — и правка Action молча пропала бы, против
+     * критерия 16 спеки. Здесь база цела: GitHub отвечает 409, срабатывает трёхстороннее слияние,
+     * значение из репо остаётся, а владелец видит расхождение.
+     */
+    @Test
+    fun `чужой коммит в ждущий путь не затирает базу слияния`() {
+        val api = api()
+        val store = ready(api)
+        store.edit(path, Edit.SetField("priority", "P3"))
+        api.put(path, Edit.apply(fix, Edit.SetField("priority", "P2")))
+        assertEquals(SyncStatus.OK, store.refresh())
+        while (store.push() == RepoStore.Push.MORE) Unit
+        val text = api.text(path)!!
+        assertTrue("правка Action перезаписана: $text", text.contains("priority: P2"))
+        val notice = store.view().notice.orEmpty()
+        assertTrue("владелец должен узнать о расхождении: $notice", notice.contains("Приоритет"))
+    }
+
     @Test
     fun `конфликт по разным полям переигрывается молча`() {
         val api = api()

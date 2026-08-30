@@ -1,5 +1,6 @@
 package com.roflochinsky.noteapp.pipeline
 
+import org.json.JSONException
 import org.json.JSONObject
 
 /**
@@ -40,10 +41,28 @@ data class RepoDelta(
          * путь в [changed], старый — в [removed]. Текст перекладывается по blob-SHA уже в кэше — он
          * у переименованного файла тот же, дочитывать нечего.
          */
-        fun parse(json: String): RepoDelta {
-            val root = runCatching { JSONObject(json) }.getOrNull() ?: return stale()
-            val files = root.optJSONArray("files") ?: return stale()
-            if (root.optString("status") == DIVERGED || files.length() >= FILE_LIMIT) return stale()
+        fun parse(json: String): RepoDelta =
+            try {
+                parsed(json)
+            } catch (@Suppress("SwallowedException") e: JSONException) {
+                // Неполным бывает не только корень ответа, но и отдельная запись `files` — без
+                // `sha` карту кэша обновить нечем, и это тот же «картины нет». Ловим именно
+                // JSONException, а не `runCatching`: тот берёт Throwable и проглотил бы заодно
+                // ошибки JVM. Исключение отсюда никто выше не разбирает — `delta()` ждёт только
+                // GithubHttpException, и оно стало бы для владельца ложным «нет сети».
+                stale()
+            }
+
+        private fun parsed(json: String): RepoDelta {
+            val root = JSONObject(json)
+            val files = root.optJSONArray("files")
+            if (
+                files == null ||
+                    root.optString("status") == DIVERGED ||
+                    files.length() >= FILE_LIMIT
+            ) {
+                return stale()
+            }
             val changed = mutableMapOf<String, String>()
             val removed = mutableSetOf<String>()
             for (i in 0 until files.length()) {
