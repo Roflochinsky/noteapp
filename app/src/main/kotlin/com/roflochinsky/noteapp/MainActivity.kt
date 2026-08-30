@@ -201,6 +201,9 @@ class MainActivity : ComponentActivity() {
                 today = LocalDate.now(),
                 taken = tasks.map { it.path }.toSet(),
                 onDismiss = { newTaskOpen = false },
+                // Реестр пополняется отдельной операцией: проект живёт дольше задачи, ради которой
+                // его завели, и остаётся в `projects.md`, даже если задачу потом удалят.
+                onNewProject = { name -> write(scope) { it.addProject(name) } },
             ) { draft ->
                 newTaskOpen = false
                 write(scope) {

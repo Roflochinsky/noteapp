@@ -29,6 +29,13 @@ sealed interface Edit {
      */
     data class CreateTask(val content: String) : Edit
 
+    /**
+     * Новая строка реестра (`projects.md`): проект, заведённый владельцем из шторки. Несёт имя, а
+     * не готовый текст, — реестр правят и руками, и Action-ом, поэтому строка дописывается в тот
+     * файл, который лежит в git прямо сейчас (`bd nikitatrubaev-0rk.23`).
+     */
+    data class AddToRegistry(val name: String) : Edit
+
     data object DeleteFile : Edit
 
     /** Ключ склейки: две правки одного поля одного файла — одна операция, побеждает последняя. */
@@ -41,6 +48,8 @@ sealed interface Edit {
                 is ToggleSubtask -> "subtask:${normalize(text)}"
                 is AddSubtask -> "subtask:${normalize(text)}"
                 is CreateTask -> "create"
+                // Два разных имени — две операции; одно и то же дважды — одна.
+                is AddToRegistry -> "entry:${normalize(name)}"
                 DeleteFile -> "delete"
             }
 
@@ -75,6 +84,8 @@ sealed interface Edit {
                 is SetStatus -> field(field(text, STATUS, edit.status), DONE, edit.done?.toString())
                 is ToggleSubtask -> toggle(text, edit.text, edit.done)
                 is AddSubtask -> add(text, edit.text)
+                // Имя уже в реестре — файл остаётся как есть; пустого коммита не будет.
+                is AddToRegistry -> Registry.add(text, edit.name) ?: text
             }
 
         fun normalize(text: String): String = text.trim().lowercase().replace(WS, " ")
