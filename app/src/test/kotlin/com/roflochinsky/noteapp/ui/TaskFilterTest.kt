@@ -161,16 +161,33 @@ class TaskFilterTest {
 
     private val zoo =
         listOf(
-            task("Фикс ретраев", priority = "P1").copy(project = "tgsum"),
-            task("Экспорт тем").copy(project = "tgsum"),
+            // today = 2026-08-26. Сроки и теги расставлены так, чтобы каждое окно «Срока» ловило
+            // свою задачу, а «Фикс ретраев» имел ДВА тега: с одним тегом на задачу разница между
+            // «тег в списке» и «первый тег» ничем бы не проверялась.
+            task("Фикс ретраев", priority = "P1", due = "2026-08-28")
+                .copy(project = "tgsum", tags = listOf("релиз", "деньги")),
+            task("Экспорт тем").copy(project = "tgsum", tags = listOf("релиз")),
             task("Виджет очереди").copy(project = "noteapp"),
-            task("Забрать посылку"),
-            task("Разобрать фото", priority = "P3", status = TaskFile.STATUS_IN_PROGRESS),
-            task("Старый долг", status = TaskFile.STATUS_DONE, done = "2026-08-25")
+            task("Забрать посылку", due = "2026-08-26"),
+            task(
+                    "Разобрать фото",
+                    priority = "P3",
+                    status = TaskFile.STATUS_IN_PROGRESS,
+                    due = "2026-08-20",
+                )
+                .copy(tags = listOf("личное")),
+            // Закрытая задача с прошедшим сроком: «просроченные» её не берут — как и строка списка.
+            task(
+                    "Старый долг",
+                    status = TaskFile.STATUS_DONE,
+                    due = "2026-08-20",
+                    done = "2026-08-25",
+                )
                 .copy(project = "tgsum"),
         )
 
-    private fun titles(filter: TaskFilter.Filter) = filter.select(zoo).map { it.title }.toSet()
+    private fun titles(filter: TaskFilter.Filter) =
+        filter.select(zoo, today).map { it.title }.toSet()
 
     @Test
     fun `чипы сужают список и складываются друг с другом`() {
@@ -201,7 +218,7 @@ class TaskFilterTest {
     @Test
     fun `счётчик в шторке фасетный — свой фильтр в расчёт не идёт`() {
         val filter = TaskFilter.Filter(project = "tgsum")
-        val counts = filter.counts(zoo, TaskFilter.Facet.PROJECT, listOf("tgsum", "noteapp"))
+        val counts = filter.counts(zoo, TaskFilter.Facet.PROJECT, listOf("tgsum", "noteapp"), today)
         assertEquals(3, counts["tgsum"])
         // noteapp остался бы нулём, если бы «Проект: tgsum» считали вместе со своим же фасетом.
         assertEquals(1, counts["noteapp"])
@@ -212,14 +229,15 @@ class TaskFilterTest {
     @Test
     fun `чужие фильтры счётчик учитывает — иначе он обещает больше, чем покажет`() {
         val filter = TaskFilter.Filter(priority = "P1", project = "tgsum")
-        val counts = filter.counts(zoo, TaskFilter.Facet.PROJECT, listOf("tgsum", "noteapp"))
+        val counts = filter.counts(zoo, TaskFilter.Facet.PROJECT, listOf("tgsum", "noteapp"), today)
         assertEquals(1, counts["tgsum"])
         assertEquals(0, counts["noteapp"])
     }
 
     @Test
     fun `значение реестра без задач остаётся в шторке со счётчиком 0`() {
-        val counts = TaskFilter.Filter().counts(zoo, TaskFilter.Facet.PROJECT, listOf("workwatch"))
+        val counts =
+            TaskFilter.Filter().counts(zoo, TaskFilter.Facet.PROJECT, listOf("workwatch"), today)
         assertEquals(0, counts["workwatch"])
     }
 
@@ -234,12 +252,84 @@ class TaskFilterTest {
         )
     }
 
+    // ── чипы «Тег» и «Срок» (срез Н3, добавка `bd nikitatrubaev-0rk.25`) ──────────────────
+
+    @Test
+    fun `чип тега сужает список по любому из тегов задачи, а не по первому`() {
+        assertEquals(setOf("Фикс ретраев", "Экспорт тем"), titles(TaskFilter.Filter(tag = "релиз")))
+        assertEquals(setOf("Фикс ретраев"), titles(TaskFilter.Filter(tag = "деньги")))
+        assertEquals(setOf("Разобрать фото"), titles(TaskFilter.Filter(tag = "личное")))
+        assertEquals(
+            setOf("Экспорт тем"),
+            titles(TaskFilter.Filter(tag = "релиз", project = "tgsum", priority = "P2")),
+        )
+    }
+
+    /** Срок — не значение, а окно; «сегодня» лежит внутри «на неделе» — это выбор, не рубрика. */
+    @Test
+    fun `чип срока сужает список окном`() {
+        assertEquals(
+            setOf("Забрать посылку"),
+            titles(TaskFilter.Filter(due = TaskFilter.DUE_TODAY)),
+        )
+        assertEquals(
+            setOf("Забрать посылку", "Фикс ретраев"),
+            titles(TaskFilter.Filter(due = TaskFilter.DUE_WEEK)),
+        )
+        assertEquals(
+            setOf("Экспорт тем", "Виджет очереди"),
+            titles(TaskFilter.Filter(due = TaskFilter.DUE_NONE)),
+        )
+    }
+
+    /** У закрытой задачи просрочки нет — то же правило, что у [TaskFilter.isOverdue] в списке. */
+    @Test
+    fun `«просроченные» не берут закрытую задачу с прошедшим сроком`() {
+        assertEquals(
+            setOf("Разобрать фото"),
+            titles(TaskFilter.Filter(due = TaskFilter.DUE_OVERDUE)),
+        )
+    }
+
+    /** Вердикт UX: свой фильтр из расчёта исключён — иначе у невыбранных окон всегда 0. */
+    @Test
+    fun `счётчик чипа «Срок» фасетный, пустое окно остаётся с нулём`() {
+        val counts =
+            TaskFilter.Filter(due = TaskFilter.DUE_TODAY)
+                .counts(zoo, TaskFilter.Facet.DUE, TaskFilter.DUES, today)
+        assertEquals(1, counts[TaskFilter.DUE_TODAY])
+        // Осталось бы нулём, если бы «Срок: сегодня» считали вместе со своим же фасетом.
+        assertEquals(1, counts[TaskFilter.DUE_OVERDUE])
+        assertEquals(2, counts[TaskFilter.DUE_WEEK])
+        assertEquals(2, counts[TaskFilter.DUE_NONE])
+        assertEquals(zoo.size, counts[null])
+        // Чужой чип счётчик учитывает, и окно без задач не пропадает, а показывает 0.
+        val narrowed =
+            TaskFilter.Filter(project = "noteapp")
+                .counts(zoo, TaskFilter.Facet.DUE, TaskFilter.DUES, today)
+        assertEquals(0, narrowed[TaskFilter.DUE_TODAY])
+        assertEquals(1, narrowed[TaskFilter.DUE_NONE])
+    }
+
+    @Test
+    fun `счётчик чипа «Тег» фасетный — теги считаются как множественные`() {
+        val counts =
+            TaskFilter.Filter(tag = "личное")
+                .counts(zoo, TaskFilter.Facet.TAG, listOf("деньги", "личное", "релиз"), today)
+        assertEquals(2, counts["релиз"])
+        assertEquals(1, counts["деньги"])
+        assertEquals(1, counts["личное"])
+        assertEquals(zoo.size, counts[null])
+    }
+
     @Test
     fun `пусто под фильтром — не то же, что «задач нет вовсе»`() {
         val filter = TaskFilter.Filter(project = "workwatch")
         assertTrue(filter.active)
+        assertTrue(TaskFilter.Filter(tag = "релиз").active)
+        assertTrue(TaskFilter.Filter(due = TaskFilter.DUE_TODAY).active)
         assertFalse(TaskFilter.Filter().active)
-        assertTrue(TaskFilter.nothingToShow(filter.select(zoo), today))
+        assertTrue(TaskFilter.nothingToShow(filter.select(zoo, today), today))
         assertFalse(TaskFilter.nothingToShow(zoo, today))
     }
 }
