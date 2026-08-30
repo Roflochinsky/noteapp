@@ -168,7 +168,9 @@ class MainActivity : ComponentActivity() {
                             notice = notice,
                             pending = { it in pendingPaths },
                             onTab = { screen = Screen.Feed(it) },
-                            onRefresh = { scope.launch { refreshRepo() } },
+                            // Жест владельца — безусловный запрос (граница Н7): открытие
+                            // приложения обходится условным и почти всегда бесплатным.
+                            onRefresh = { scope.launch { refreshRepo(force = true) } },
                             onRecord = ::onRecord,
                             onSettings = { screen = Screen.Onboarding },
                             onTask = { screen = Screen.Task(it) },
@@ -371,12 +373,12 @@ class MainActivity : ComponentActivity() {
      * `tasks()` парсит каждый файл кэша, поэтому обе выборки живут в IO: главный поток только
      * рисует.
      */
-    private suspend fun refreshRepo() {
+    private suspend fun refreshRepo(force: Boolean = false) {
         refreshing = true
         try {
             store()
             reload()
-            sync = withContext(Dispatchers.IO) { repoStore?.refresh() } ?: SyncStatus.NO_TOKEN
+            sync = withContext(Dispatchers.IO) { repoStore?.refresh(force) } ?: SyncStatus.NO_TOKEN
             reload()
         } finally {
             refreshing = false

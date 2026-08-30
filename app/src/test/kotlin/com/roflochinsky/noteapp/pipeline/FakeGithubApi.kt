@@ -18,6 +18,21 @@ class FakeGithubApi(
     var readRefCalls = 0
         private set
 
+    /** Сколько условных опросов закончились 304 — то есть ничего не стоили (research §3.2). */
+    var notModifiedCalls = 0
+        private set
+
+    var compareCalls = 0
+        private set
+
+    var readTreeCalls = 0
+        private set
+
+    /**
+     * «`compare` картины не даёт»: усечение или разошедшиеся ветки — тогда пересбор через дерево.
+     */
+    var compareStale = false
+
     var writeCalls = 0
         private set
 
@@ -27,21 +42,32 @@ class FakeGithubApi(
     /** «Пока мы правили, в git приехало своё» — вызывается тестом перед ответом на запись. */
     var onWrite: (() -> Unit)? = null
 
-    /** «Пока обновление шло по сети, кто-то успел записать» — зовётся после снимка дерева. */
+    /**
+     * «Пока обновление шло по сети, кто-то успел записать» — зовётся после того, как ответ на
+     * чтение состояния репо собран, но снимок ещё не записан. Окно одно и то же у обоих путей
+     * обновления, поэтому хук висит и на дереве, и на `compare`.
+     */
     var onTree: (() -> Unit)? = null
 
     /** Блобы в git не исчезают, когда файл переписан: старый sha читается и после коммита. */
     private val blobs = mutableMapOf<String, String>()
 
+    /** Карта репо на каждом коммите: `compare` без истории невозможен. */
+    private val history = mutableMapOf<String, Map<String, String>>()
+
+    init {
+        history[commitSha] = files.mapValues { sha(it.value) }
+    }
+
     fun put(path: String, text: String) {
         files[path] = text
         blobs[sha(text)] = text
-        commitSha = "commit-${files.hashCode()}"
+        commit()
     }
 
     fun remove(path: String) {
         files.remove(path)
-        commitSha = "commit-${files.hashCode()}"
+        commit()
     }
 
     fun text(path: String): String? = files[path]
@@ -50,11 +76,48 @@ class FakeGithubApi(
 
     private fun sha(text: String) = "blob-${text.hashCode()}"
 
-    override fun readRef(): String {
+    /** Коммит двигает ветку и запоминает карту репо — с неё потом отвечает [compare]. */
+    private fun commit() {
+        commitSha = "commit-${files.hashCode()}"
+        history[commitSha] = files.mapValues { sha(it.value) }
+    }
+
+    /**
+     * ETag фейка — сам SHA коммита: у настоящего `git/ref` тело и есть «где ветка», поэтому пока
+     * ветка не двигалась, не меняется и он. Совпал с присланным — 304 и `null`, как у GitHub.
+     */
+    override fun readRef(etag: String?): Ref? {
         fail?.let { throw it }
         readRefCalls++
-        return commitSha
+        if (etag == commitSha) {
+            notModifiedCalls++
+            return null
+        }
+        return Ref(commitSha, commitSha)
     }
+
+    /**
+     * Разница двух снимков репо по карте `путь → blobSha`. История коммитов ведётся в [history] —
+     * без неё «что изменилось с прошлого раза» нечем ответить, а именно это и проверяют тесты
+     * дельты.
+     */
+    override fun compare(base: String, head: String): RepoDelta {
+        fail?.let { throw it }
+        compareCalls++
+        val was = history[base]
+        val now = history[head]
+        if (was == null || now == null || compareStale) return stale()
+        val delta =
+            RepoDelta(
+                changed = now.filter { (path, sha) -> was[path] != sha },
+                removed = was.keys - now.keys,
+                stale = false,
+            )
+        onTree?.invoke()
+        return delta
+    }
+
+    private fun stale() = RepoDelta(emptyMap(), emptySet(), stale = true)
 
     /**
      * Дерево спрашивают по SHA коммита — фейк на этом настаивает: подстановка имени ветки или
@@ -62,6 +125,7 @@ class FakeGithubApi(
      */
     override fun readTree(commitSha: String): Map<String, String> {
         fail?.let { throw it }
+        readTreeCalls++
         if (commitSha != this.commitSha) {
             throw GithubHttpException(HTTP_NOT_FOUND, "нет коммита $commitSha")
         }
@@ -121,7 +185,7 @@ class FakeGithubApi(
             }
         }
         changes.filterIsInstance<BatchPlan.Put>().forEach { blobs[sha(it.content)] = it.content }
-        commitSha = "commit-${files.hashCode()}"
+        commit()
         return Written(null, commitSha)
     }
 

@@ -35,18 +35,22 @@ class GithubBatchTest {
         checkNotNull(javaClass.getResource("/github/$name.json")) { "нет фикстуры $name" }
             .readText()
 
+    private fun get(url: String): String {
+        got += url
+        return when {
+            url.endsWith("git/ref/heads/main") -> fixture("ref")
+            url.contains("git/commits/") -> fixture("git-commit")
+            else -> error("неожиданный GET $url")
+        }
+    }
+
     private fun client(refuseRef: Int = 0, code: Int = 422) =
         GithubClient(
             repo,
             "ghp_v-test-ne-uhodit",
-            fetch = { url ->
-                got += url
-                when {
-                    url.endsWith("git/ref/heads/main") -> fixture("ref")
-                    url.contains("git/commits/") -> fixture("git-commit")
-                    else -> error("неожиданный GET $url")
-                }
-            },
+            fetch = ::get,
+            // Ветку батч читает безусловно, но тем же швом, что и поллинг: пустой ETag.
+            conditional = { url, _ -> Fetched(get(url), null) },
             write = { method, url, body ->
                 got += "$method $url"
                 bodies += body

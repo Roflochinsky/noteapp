@@ -19,7 +19,17 @@ class RepoCache(val dir: File, private val repo: String, token: String?) {
 
     data class Entry(val sha: String, val text: String)
 
-    data class Snapshot(val commitSha: String = "", val files: Map<String, Entry> = emptyMap())
+    /**
+     * @param etag ETag последнего ответа `git/ref`. Лежит рядом со снимком не для красоты: он
+     *   зависит от заголовков запроса (research §3.2), поэтому смена репо или токена обязана унести
+     *   его вместе с текстами — иначе поллинг молча перестаёт отдавать 304. Личность кэша это и
+     *   делает: чужой файл — холодный старт.
+     */
+    data class Snapshot(
+        val commitSha: String = "",
+        val files: Map<String, Entry> = emptyMap(),
+        val etag: String = "",
+    )
 
     private var memo: Snapshot? = null
     private var seen = ""
@@ -64,6 +74,7 @@ class RepoCache(val dir: File, private val repo: String, token: String?) {
                 val files = json.getJSONObject("files")
                 Snapshot(
                     commitSha = json.optString("commit"),
+                    etag = json.optString("etag"),
                     files =
                         files.keys().asSequence().associateWith { path ->
                             val e = files.getJSONObject(path)
@@ -85,6 +96,7 @@ class RepoCache(val dir: File, private val repo: String, token: String?) {
                 .put("repo", repo)
                 .put("tokenHash", tokenHash)
                 .put("commit", snapshot.commitSha)
+                .put("etag", snapshot.etag)
                 .put("files", files)
         dir.mkdirs()
         synchronized(WRITING) {
