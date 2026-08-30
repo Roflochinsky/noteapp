@@ -73,15 +73,20 @@ class FeedScreenTest {
         )
 
     /** Локальная запись той же встречи: телефон её уже расшифровал и отправил. */
-    private fun record(id: String, pushed: Boolean = true, transcribed: Boolean = true) =
+    private fun record(
+        id: String,
+        pushed: Boolean = true,
+        transcribed: Boolean = true,
+        title: String = "Смотри, по релизу",
+    ) =
         NotesStore.Note(
             id = id,
             hasAudio = true,
             transcribed = transcribed,
             pushed = pushed,
             durationSec = 751,
-            title = "Смотри, по релизу",
-            preview = "Смотри, по релизу: я бы закрыл экспорт тем",
+            title = title,
+            preview = "$title: я бы закрыл экспорт тем",
         )
 
     private fun screen(feed: List<FeedItem>, people: List<String> = emptyList()) {
@@ -135,11 +140,49 @@ class FeedScreenTest {
         compose.onNodeWithText("в очереди — расшифровка").assertExists()
     }
 
+    /**
+     * Ключ строки — не `ref`. `ref` точен до минуты (это ключ СКЛЕЙКИ), а id записи — до секунды:
+     * два длинных нажатия в одну минуту давали `LazyColumn` один ключ на две строки, и вкладка
+     * «Заметки» падала `IllegalArgumentException` при каждом запуске (регрессия среза Н5).
+     */
     @Test
-    fun `тап по строке открывает заметку по её ref`() {
+    fun `две записи в одну минуту — две строки, а не падение`() {
+        screen(
+            NoteRef.merge(
+                listOf(
+                    record("20260826-120005", pushed = false, title = "Первая мысль"),
+                    record("20260826-120041", pushed = false, title = "Вторая мысль"),
+                ),
+                emptyList(),
+            )
+        )
+        compose.onNodeWithText("Первая мысль").assertExists()
+        compose.onNodeWithText("Вторая мысль").assertExists()
+    }
+
+    /** Ключ навигации тоже обязан быть уникальным: иначе деталка открывает не ту заметку. */
+    @Test
+    fun `тап по строке открывает именно ту заметку, на которую нажали`() {
+        screen(
+            NoteRef.merge(
+                listOf(
+                    record("20260826-120005", pushed = false, title = "Первая мысль"),
+                    record("20260826-120041", pushed = false, title = "Вторая мысль"),
+                ),
+                emptyList(),
+            )
+        )
+        compose.onNodeWithText("Вторая мысль").performClick()
+        assertEquals("20260826-120041", opened)
+        compose.onNodeWithText("Первая мысль").performClick()
+        assertEquals("20260826-120005", opened)
+    }
+
+    @Test
+    fun `тап по заметке репо открывает её по пути файла`() {
         screen(NoteRef.merge(emptyList(), listOf(meeting)))
         compose.onNodeWithText("Созвон с Димой — релиз tgsum").performClick()
-        assertEquals("20260824-1807", opened)
+        assertEquals("встречи/2026-08-24-1807-reliz.md", opened)
     }
 
     @Test

@@ -114,8 +114,11 @@ class RepoStore(
             notice = takeDivergence(),
             projects = projects(ops, snapshot),
             notes =
-                overlay(ops, snapshot, NoteRef::isNote).mapNotNull { (path, text) ->
-                    NoteFile.parse(path, text)
+                overlay(ops, snapshot, NoteRef::isNote).map { (path, text) ->
+                    // Файл не нашего формата (без frontmatter) не выбрасываем: `mapNotNull`
+                    // терял его молча, вопреки обещанию `NoteRef.merge` «уходит вниз, но не
+                    // теряется». Без полей он и уйдёт вниз — но останется видимым.
+                    NoteFile.parse(path, text) ?: NoteFile.Note(path, emptyMap(), text)
                 },
             people = Registry.names(snapshot.files[Registry.PEOPLE]?.text),
         )

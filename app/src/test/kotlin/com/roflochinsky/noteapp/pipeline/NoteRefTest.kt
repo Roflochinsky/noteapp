@@ -1,6 +1,5 @@
 package com.roflochinsky.noteapp.pipeline
 
-import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -9,9 +8,13 @@ import org.junit.Test
 /**
  * Тождество «локальная запись ↔ файл в репо» (решение LLD-10) и склейка ленты (решение LLD-11).
  *
- * Фикстуры настоящие: тексты заметок — `app/src/test/resources/repo/`, пара имён до и после
- * переименования Action-ом — из снятого с живого GitHub `compare-ahead.json` (в нём есть статус
- * `renamed` с `previous_filename`). Сочинять их запрещено (граница автономии плана).
+ * Фикстуры настоящие: тексты заметок — `app/src/test/resources/repo/`, пара «до и после
+ * переименования Action-ом» — эталонная пара `app/src/test/resources/action/` (raw-вход от телефона
+ * и done-результат промпта). Сочинять их запрещено (граница автономии плана).
+ *
+ * Пара `renamed` из `compare-ahead.json` для этого не годится и убрана из теста: в ней времени нет
+ * НИ В ОДНОМ из двух имён, поэтому обе стороны сводились к одному и тому же тексту и тест проходил
+ * при любой реализации (замечание ревью Н5).
  */
 class NoteRefTest {
 
@@ -34,17 +37,18 @@ class NoteRefTest {
             preview = "Смотри, по релизу",
         )
 
-    /** Пара имён того же файла до и после переименования — из ответа `compare` живого репо. */
-    private fun renamed(): Pair<String, String> {
-        val json =
-            JSONObject(checkNotNull(javaClass.getResource("/github/compare-ahead.json")).readText())
-        val files = json.getJSONArray("files")
-        val renamed =
-            (0 until files.length())
-                .map { files.getJSONObject(it) }
-                .single { it.getString("status") == "renamed" }
-        return renamed.getString("previous_filename") to renamed.getString("filename")
-    }
+    /**
+     * Конечный путь заметки после переноса Action-ом — не из головы: его называет `source:`
+     * соседнего файла задачи той же эталонной пары.
+     */
+    private fun movedTo(): String =
+        checkNotNull(
+            TaskFile.parse(
+                    "tasks/2026-08-26-podnyat-limit-retraev.md",
+                    ActionFixture.text("2026-08-26-podnyat-limit-retraev.md"),
+                )
+                .source
+        )
 
     @Test
     fun `запись и её файл в репо дают один ref`() {
@@ -53,10 +57,33 @@ class NoteRefTest {
         assertEquals(fromRecord, fromRepo)
     }
 
+    /**
+     * Настоящее переименование Action-ом: `inbox/2026-08-26-0914.md` со `status: raw` уезжает в
+     * папку типа под слагом, и вместе с путём меняются тип, участники, проект, теги, заголовок и
+     * статус. Ref обязан пережить всё это разом — сравниваются РАЗНЫЕ тексты под РАЗНЫМИ путями.
+     */
     @Test
     fun `переименование Action-ом ref не меняет`() {
-        val (before, after) = renamed()
-        assertEquals(NoteRef.of(note(before, vone)), NoteRef.of(note(after, vone)))
+        val before = note("inbox/2026-08-26-0914.md", ActionFixture.text("note-raw-with-tasks.md"))
+        val after = note(movedTo(), ActionFixture.text("note-done-with-tasks.md"))
+        assertEquals("встречи/2026-08-26-0914-limity-retraev.md", after.path)
+        assertEquals("20260826-0914", NoteRef.of(before))
+        assertEquals(NoteRef.of(before), NoteRef.of(after))
+    }
+
+    /**
+     * `recorded` бьёт имя файла, и это не вкусовщина: промпт Action прямо запрещает трогать
+     * `recorded` («Поле recorded, duration, device не трогай»), а имя файла он как раз переписывает
+     * — переносит в папку типа и дописывает слаг. Значит на расхождении прав frontmatter от
+     * телефона, а не время, оставшееся в имени. Проверяется расхождением: `recorded` 18:07, в имени
+     * 18:10.
+     */
+    @Test
+    fun `имя файла разошлось с recorded — верен recorded`() {
+        val moved = note("встречи/2026-08-24-1810-reliz-tgsum.md", vtwo)
+        assertEquals("20260824-1807", NoteRef.of(moved))
+        val feed = NoteRef.merge(listOf(record("20260824-180732")), listOf(moved))
+        assertEquals("запись и её файл разъехались бы на две строки", 1, feed.size)
     }
 
     /** Имя файла — запасное тождество: `recorded` из frontmatter точнее и идёт первым. */
@@ -111,6 +138,62 @@ class NoteRefTest {
         val pushed = NoteRef.merge(local, listOf(note("встречи/2026-08-24-1807-r.md", vtwo)))
         assertEquals(1, pushed.size)
         assertTrue(pushed[0].pushed)
+    }
+
+    /**
+     * Блокер ревью Б2: `associateBy` по ref схлопывал две заметки одной минуты, и первая молча
+     * исчезала из ленты. Минута — предел ТОЖДЕСТВА, но не предел репо: Action переносит такие
+     * заметки под разными слагами в разные папки типов, файлы у них разные. «Ошибка не теряет
+     * запись» — значит обе строки на месте.
+     */
+    @Test
+    fun `две заметки репо в одну минуту дают две строки`() {
+        val feed =
+            NoteRef.merge(
+                emptyList(),
+                listOf(
+                    note("встречи/2026-08-24-1807-reliz-tgsum.md", vtwo),
+                    note("идеи/2026-08-24-1807-eksport.md", vtwo),
+                ),
+            )
+        assertEquals(
+            listOf("встречи/2026-08-24-1807-reliz-tgsum.md", "идеи/2026-08-24-1807-eksport.md"),
+            feed.mapNotNull { it.path }.sorted(),
+        )
+    }
+
+    /** Уникален не ref (он общий у минуты), а ключ строки: путь файла либо id записи. */
+    @Test
+    fun `ключи строк ленты уникальны, даже когда ref общий`() {
+        val feed =
+            NoteRef.merge(
+                listOf(record("20260824-180705"), record("20260824-180741")),
+                listOf(
+                    note("встречи/2026-08-24-1807-reliz-tgsum.md", vtwo),
+                    note("идеи/2026-08-24-1807-eksport.md", vtwo),
+                ),
+            )
+        assertEquals(listOf("20260824-1807"), feed.map { it.ref }.distinct())
+        assertEquals(feed.size, feed.map { it.key }.distinct().size)
+    }
+
+    /**
+     * Одна минута, но записей и файлов поровну: склейка разводит их парами, а не вешает один и тот
+     * же файл на обе строки — иначе владелец видит одну заметку дважды.
+     */
+    @Test
+    fun `записи одной минуты разбираются по файлам по одному`() {
+        val feed =
+            NoteRef.merge(
+                listOf(record("20260824-180705"), record("20260824-180741")),
+                listOf(
+                    note("встречи/2026-08-24-1807-reliz-tgsum.md", vtwo),
+                    note("идеи/2026-08-24-1807-eksport.md", vtwo),
+                ),
+            )
+        assertEquals(2, feed.size)
+        assertEquals(2, feed.mapNotNull { it.path }.distinct().size)
+        assertEquals(2, feed.mapNotNull { it.noteId }.distinct().size)
     }
 
     @Test

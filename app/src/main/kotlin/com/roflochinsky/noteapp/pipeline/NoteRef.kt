@@ -8,10 +8,14 @@ import java.time.format.DateTimeFormatter
  * Тождество «локальная запись ↔ файл заметки в репо» (решение LLD-10) и склейка ленты (LLD-11):
  * лента — это записи [NotesStore] ∪ заметки из кэша репо, а не два разных списка.
  *
- * Ref — минута записи, `ггггММдд-ЧЧмм`. Точнее не бывает и не нужно: телефон кладёт файл под именем
- * `ГГГГ-ММ-ДД-ЧЧММ.md` (спека формата, решение 2), то есть секунд в репо нет ни у кого. Две записи
- * в одну минуту склеятся в одну строку — но они и в репо легли бы одним именем, так что это предел
- * формата, а не этой склейки.
+ * Ref — минута записи, `ггггММдд-ЧЧмм`. Точнее тождество взять неоткуда: телефон кладёт файл под
+ * именем `ГГГГ-ММ-ДД-ЧЧММ.md` (спека формата, решение 2), то есть секунд в репо нет ни у кого.
+ *
+ * **Ref — ключ СКЛЕЙКИ, а не уникальный ключ строки.** Две записи в одну минуту делят ref законно,
+ * и это не значит, что они одна заметка: Action переносит их под разными слагами в разные папки
+ * типов, файлы у них разные. Поэтому [merge] разводит совпавшие по ref пары по одной (запись —
+ * своему файлу), а лишние остаются отдельными строками: «ошибка не теряет запись». Уникальный ключ
+ * строки — для списка и навигации — даёт [FeedItem.key].
  *
  * Тождество переживает переименование Action-ом (`renamed`/`previous_filename` в `compare`) само
  * собой: `recorded` в frontmatter при переносе не меняется, а имя файла — запасной путь на случай
@@ -49,9 +53,13 @@ object NoteRef {
         runCatching { LocalDateTime.parse(noteId, ID).format(REF) }.getOrDefault(noteId)
 
     /**
-     * Ref заметки из репо: `recorded` точнее имени файла (Action дописывает слаг, а время оставляет
-     * как есть), поэтому он первый. Не разобралось ни то ни другое — ref сам путь: строка ленты
-     * останется одинокой, но заметка не пропадёт.
+     * Ref заметки из репо: **`recorded` бьёт имя файла**, поэтому он первый. Асимметрия записана в
+     * промпте Action (`docs/examples/process-notes.yml`): «поле `recorded` не трогай», а имя файла
+     * он как раз переписывает — переносит в папку типа и дописывает слаг. Значит на расхождении
+     * прав frontmatter от телефона, а не имя, придуманное моделью.
+     *
+     * Не разобралось ни то ни другое — ref сам путь: строка ленты останется одинокой, но заметка не
+     * пропадёт.
      */
     fun of(note: NoteFile.Note): String =
         recorded(note.fields["recorded"]) ?: named(note.path) ?: note.path
@@ -69,12 +77,19 @@ object NoteRef {
     /**
      * Лента одним списком: та же заметка с телефона и из репо — одна строка. Свежие сверху; строки
      * без разобранного времени (чужой файл в папке типа) уходят вниз, но не теряются.
+     *
+     * Совпавшие по ref разбираются **парами, по одной**, а не картой «ref → заметка»: карта теряла
+     * все файлы одной минуты, кроме последнего (блокер ревью Н5), а одна и та же заметка,
+     * подставленная двум записям, показала бы её дважды. Не нашедшая пары сторона — своя строка.
      */
     fun merge(local: List<NotesStore.Note>, notes: List<NoteFile.Note>): List<FeedItem> {
-        val byRef = notes.associateBy { of(it) }
-        val fromRecords = local.map { FeedItem(of(it.id), it, byRef[of(it.id)]) }
-        val taken = fromRecords.map { it.ref }.toSet()
-        val fromRepo = byRef.filterKeys { it !in taken }.map { FeedItem(it.key, null, it.value) }
+        val byRef = notes.groupBy(::of).mapValues { (_, same) -> same.toMutableList() }
+        val fromRecords =
+            local.map { record ->
+                val ref = of(record.id)
+                FeedItem(ref, record, byRef[ref]?.removeFirstOrNull())
+            }
+        val fromRepo = byRef.values.flatten().map { FeedItem(of(it), null, it) }
         return (fromRecords + fromRepo).sortedWith(
             compareByDescending<FeedItem> { it.time != null }.thenByDescending { it.ref }
         )
@@ -87,6 +102,15 @@ object NoteRef {
  * придумал Claude), аудио, длительность и статус доставки — телефон.
  */
 data class FeedItem(val ref: String, val local: NotesStore.Note?, val note: NoteFile.Note?) {
+
+    /**
+     * Уникальный ключ строки — списка [androidx.compose.foundation.lazy.LazyColumn] и навигации.
+     * Это НЕ [ref]: ref точен до минуты, потому что он ключ склейки, и две записи одной минуты
+     * делят его законно. Уникальность даёт источник строки: id записи точен до секунды, путь файла
+     * уникален в репо. Ключ у строки не меняется, пока не сменился её источник.
+     */
+    val key: String
+        get() = local?.id ?: note?.path ?: ref
 
     val noteId: String?
         get() = local?.id

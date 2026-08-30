@@ -64,8 +64,12 @@ class MainActivity : ComponentActivity() {
         /** Вкладка — часть состояния экрана: Back с «Задач» возвращает на «Заметки». */
         data class Feed(val tab: Tab = Tab.NOTES) : Screen
 
-        /** Заметка открывается по ref склейки: у неё может не быть ни записи, ни файла в репо. */
-        data class Detail(val ref: String) : Screen
+        /**
+         * Заметка открывается по ключу строки ленты (`FeedItem.key`) — уникальному, в отличие от
+         * `ref`: у неё может не быть ни записи, ни файла в репо, но одна из двух сторон есть
+         * всегда, и она же даёт ключ.
+         */
+        data class Detail(val key: String) : Screen
 
         data class Task(val path: String) : Screen
     }
@@ -179,11 +183,11 @@ class MainActivity : ComponentActivity() {
             is Screen.Detail -> {
                 val back = { screen = Screen.Feed() }
                 BackHandler { back() }
-                val item = feed().firstOrNull { it.ref == s.ref }
+                val item = feed().firstOrNull { it.key == s.key }
                 if (item == null) {
                     // Заметку унесло обновлением (Action перенёс, владелец удалил) — уходим на
                     // ленту эффектом: писать в state прямо в теле композиции нельзя.
-                    LaunchedEffect(s.ref) { back() }
+                    LaunchedEffect(s.key) { back() }
                 } else {
                     DetailScreen(
                         item = item,

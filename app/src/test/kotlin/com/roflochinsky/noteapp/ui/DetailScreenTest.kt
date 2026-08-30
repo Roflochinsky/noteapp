@@ -129,6 +129,19 @@ class DetailScreenTest {
         assertEquals(Edit.SetField("project", "workwatch"), edit)
     }
 
+    /**
+     * Снятие поля. «Без проекта» — не «ничего не делать»: это `SetField(project, null)`, то есть
+     * ключ уходит из frontmatter («поле опускается, если его нет», ADR). Пока теста не было, правка
+     * «только при непустом значении» проходила гейт зелёной (мутация ревью Н5).
+     */
+    @Test
+    fun `снятие проекта уходит правкой с пустым значением`() {
+        screen()
+        compose.onNodeWithText("tgsum").performClick()
+        compose.onNodeWithText("Без проекта").performClick()
+        assertEquals(Edit.SetField("project", null), edit)
+    }
+
     /** Участники — выбор из реестра `people.md` плюс те, кого Claude услышал в записи. */
     @Test
     fun `участник добавляется из реестра списком`() {

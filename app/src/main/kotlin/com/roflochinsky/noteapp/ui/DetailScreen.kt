@@ -97,12 +97,12 @@ fun DetailScreen(
     val dir = remember(item.noteId) { item.noteId?.let { NotesStore.noteDir(context, it) } }
     // Транскрипт с телефона, а для заметки, которой на этом телефоне нет, — из файла репо.
     val transcript =
-        remember(item.ref) {
+        remember(item.key) {
             dir?.let { File(it, NotesStore.TRANSCRIPT_MD).takeIf(File::exists)?.readText() }
                 ?: item.note?.section(TRANSCRIPT)?.trim().orEmpty()
         }
     val marks =
-        remember(item.ref) {
+        remember(item.key) {
             dir?.let { File(it, NotesStore.MARKS).takeIf(File::exists) }
                 ?.readLines()
                 ?.mapNotNull { it.trim().toLongOrNull() }

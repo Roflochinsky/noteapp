@@ -141,7 +141,9 @@ private fun NoteList(
                         modifier = Modifier.padding(start = 22.dp, top = 18.dp, bottom = 4.dp),
                     )
                 }
-                itemsIndexed(dayNotes, key = { _, note -> note.ref }) { i, note ->
+                // Ключ — `note.key`, а НЕ `note.ref`: ref точен до минуты (он ключ склейки), и две
+                // записи в одну минуту роняли список `IllegalArgumentException` (блокер ревью Н5).
+                itemsIndexed(dayNotes, key = { _, note -> note.key }) { i, note ->
                     // Комп: `.doc-item + .doc-item{border-top}` — линия висит на самой строке
                     // с её паддингом, то есть идёт от края до края, и только между соседями:
                     // под последней записью дня и над рубрикой следующего её нет. Так же
@@ -150,7 +152,7 @@ private fun NoteList(
                     if (i > 0) {
                         HorizontalDivider(color = DocPalette.Line)
                     }
-                    NoteItem(note, onClick = { onNote(note.ref) })
+                    NoteItem(note, onClick = { onNote(note.key) })
                 }
             }
     }
