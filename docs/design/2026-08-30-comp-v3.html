@@ -1,0 +1,310 @@
+<title>noteapp · Документ v3 — транскрипту можно верить</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&family=Roboto+Mono:wght@400;500&display=swap">
+
+<!--
+THESIS: транскрипт — тот же документ, а не лог машины. Правка реплики происходит по месту, в самой строке; плеер — тихая полоса внизу, а не отдельный экран.
+OWN-WORLD: мир v1/v2 «Документ» без изменений — холодная бумага #FBFBF9, чернильный найви #1F2A44, синий #3A6FB8 (идентичность, спикер 1), nav #243B63 (спикер 2), янтарь — очередь, err только на деструктиве. Roboto + Roboto Mono (цифры и таймкоды).
+STORY: Никита слушает свою запись, видит «вел судом» вместо «давай обсудим», правит строку пальцем и едет дальше; правка уходит коммитом, имя предлагается в словарь.
+FIRST VIEWPORT: вкладка «Транскрипт», строки реплик с таймкодами, текущая подсвечена, плеер прижат книзу.
+FORM: расширение утверждённого скелета «Документ» (пины владельца — nikitatrubaev-pdj.4 и nikitatrubaev-5dd.3); лотерея снята пинами, extension без seed.
+FINISH: unreviewed and undocumented is unfinished — комп ждёт утверждения владельцем в тикете nikitatrubaev-7cy.4, затем запись в DESIGN.md.
+-->
+
+<style>
+  :root{--g-bg:#F4F6F7; --g-ink:#1B2427; --g-mut:#5C6E74; --g-line:#D8E0E2;}
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){--g-bg:#111517; --g-ink:#E8EDEE; --g-mut:#93A5AA; --g-line:#27313499;}
+  }
+  :root[data-theme="dark"]{--g-bg:#111517; --g-ink:#E8EDEE; --g-mut:#93A5AA; --g-line:#27313499;}
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--g-bg); color:var(--g-ink); font-family:"Roboto",system-ui,sans-serif; line-height:1.5}
+  .wrap{max-width:3400px; margin:0 auto; padding:44px 30px 90px}
+  .gal h1{font-family:"Roboto",sans-serif; font-weight:700; font-size:clamp(1.6rem,3vw,2.2rem); letter-spacing:-0.02em}
+  .gal p{color:var(--g-mut); max-width:70ch; margin-top:8px}
+  .row{display:flex; gap:26px; overflow-x:auto; padding:26px 2px 20px; align-items:flex-start}
+  .board{flex:0 0 auto}
+  .board figcaption{margin-top:10px; font-size:.85rem; color:var(--g-mut); text-align:center; max-width:393px}
+  .ask{margin-top:34px; padding:20px 22px; border:1px solid var(--g-line); border-radius:14px; max-width:1000px}
+  .ask h2{font-size:1.05rem; font-weight:700; letter-spacing:-0.01em}
+  .ask p{color:var(--g-mut); margin-top:6px; font-size:.92rem}
+  .ask ol{margin:10px 0 0 18px; color:var(--g-mut); font-size:.92rem; display:flex; flex-direction:column; gap:6px}
+  .ask b{color:var(--g-ink)}
+
+  /* ===== мир «Документ» — фиксированные цвета (v1) ===== */
+  .doc{--paper:#FBFBF9; --paper2:#F3F3EE; --ink:#1F2A44; --mut:#6A7386; --line:#E3E3DC; --blue:#3A6FB8; --blue-soft:#3A6FB81A;
+       --rec:#E8553F; --amber:#8A5A0F; --amber-soft:#8A5A0F14; --green:#2E7D53; --nav:#243B63; --err:#B3261E;}
+  .phone{width:393px; height:852px; border-radius:28px; overflow:hidden; position:relative; box-shadow:0 12px 32px -12px #0006;
+         display:flex; flex-direction:column; background:var(--paper); color:var(--ink); font-family:"Roboto",sans-serif}
+  .sb{display:flex; justify-content:space-between; align-items:center; font-size:.78rem; padding:12px 22px 4px; font-family:"Roboto Mono",monospace; color:var(--mut)}
+  .ic{width:22px;height:22px;flex:0 0 auto}
+  .ic-s{width:16px;height:16px;flex:0 0 auto}
+
+  .dt-head{padding:8px 22px 0}
+  .dt-head .nav{display:flex; justify-content:space-between; align-items:center; color:var(--mut); margin-bottom:10px}
+  .dt-head h4{font-family:"Roboto",sans-serif; font-size:1.3rem; font-weight:700; line-height:1.28; letter-spacing:-0.015em}
+  .metachips{display:flex; gap:8px; padding:10px 22px 0; flex-wrap:wrap}
+  .chip{display:inline-flex; align-items:center; gap:6px; padding:7px 12px; border-radius:9px; border:1px solid var(--line);
+        font-size:.82rem; color:var(--mut); white-space:nowrap; background:none; font-family:inherit}
+  .chip svg{width:12px;height:12px}
+  .tabs{display:flex; gap:2px; margin:14px 22px 0; border-bottom:1.5px solid var(--line)}
+  .tabs button{flex:1; padding:10px 4px 11px; background:none; border:none; font-family:inherit; font-size:.9rem; color:var(--mut); border-bottom:2px solid transparent; margin-bottom:-1.5px}
+  .tabs button.on{color:var(--blue); border-bottom-color:var(--blue); font-weight:600}
+
+  /* ===== v3: транскрипт ===== */
+  .tr{padding:6px 22px 0; flex:1; overflow:hidden}
+  .rep{display:flex; gap:12px; padding:11px 0; border-top:1px solid var(--line)}
+  .rep:first-child{border-top:none}
+  .rep .tc{font-family:"Roboto Mono",monospace; font-size:.75rem; color:var(--mut); width:38px; flex:0 0 auto; padding-top:3px}
+  .rep .col{min-width:0}
+  .rep .who{font-size:.72rem; letter-spacing:.06em; text-transform:uppercase; font-weight:600; color:var(--blue)}
+  .rep.s2 .who{color:var(--nav)}
+  .rep .txt{font-size:.93rem; line-height:1.55; margin-top:2px}
+  .rep.now{background:var(--blue-soft); margin:0 -10px; padding-left:10px; padding-right:10px; border-radius:8px; border-top-color:transparent}
+  .rep.now + .rep{border-top-color:transparent}
+  .rep .fixed{display:inline-flex; align-items:center; gap:4px; font-size:.72rem; color:var(--mut); margin-top:4px}
+  .rep .fixed svg{width:11px;height:11px}
+
+  /* правка реплики по месту */
+  .rep.edit{background:var(--paper); margin:0 -10px; padding:12px 10px 10px; border-radius:12px; border:1.5px solid var(--blue); border-top-color:var(--blue)}
+  .rep.edit + .rep{border-top-color:transparent}
+  .rep.edit .tc{color:#A6ACB9}
+  .rep.edit .field{font-size:.93rem; line-height:1.55; margin-top:3px}
+  .rep.edit .caret{border-left:1.5px solid var(--ink); margin-left:1px}
+  .edit-foot{display:flex; align-items:center; gap:10px; margin-top:10px}
+  .edit-foot .lock{display:inline-flex; align-items:center; gap:5px; font-size:.75rem; color:var(--mut); margin-right:auto}
+  .edit-foot .lock svg{width:12px;height:12px}
+  .edit-foot button{padding:8px 14px; border-radius:10px; border:none; font-family:inherit; font-size:.85rem; font-weight:600; background:none}
+  .edit-foot .cancel{color:var(--mut)}
+  .edit-foot .save{background:var(--nav); color:#F4F7FB}
+
+  /* плеер — тихая полоса внизу */
+  .player{margin:auto 22px 0; padding:11px 14px; border-radius:12px; background:var(--paper2); display:flex; align-items:center; gap:12px}
+  .player .pp{width:32px;height:32px;border-radius:50%;background:var(--nav);color:#F4F7FB;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .player .bar{flex:1; height:3px; background:var(--line); border-radius:2px; position:relative}
+  .player .bar i{position:absolute; left:0; top:0; bottom:0; width:41%; background:var(--blue); border-radius:2px}
+  .player .bar b{position:absolute; left:41%; top:-4px; width:11px; height:11px; border-radius:50%; background:var(--blue); transform:translateX(-50%)}
+  .player .t{font-family:"Roboto Mono",monospace; font-size:.75rem; color:var(--mut); flex:0 0 auto}
+
+  .statusline{margin:12px 22px 0; padding:10px 14px; border-radius:10px; background:var(--paper2); font-size:.8rem; color:var(--mut); display:flex; align-items:center; gap:8px}
+  .statusline.queued{background:var(--amber-soft); color:var(--amber)}
+  .statusline svg{width:14px;height:14px;flex:0 0 auto}
+
+  /* плашка предложения — непрерывающая, не модалка и не тост */
+  .offer{margin:12px 22px 0; padding:12px 14px; border-radius:12px; border:1px solid var(--line); display:flex; gap:12px; align-items:flex-start}
+  .offer .col{min-width:0}
+  .offer .h{font-size:.88rem; font-weight:600}
+  .offer .s{font-size:.78rem; color:var(--mut); margin-top:3px; line-height:1.45}
+  .offer .acts{display:flex; gap:6px; margin-top:9px}
+  .offer button{padding:7px 12px; border-radius:9px; border:1px solid var(--line); background:none; font-family:inherit; font-size:.82rem; color:var(--ink)}
+  .offer button.yes{background:var(--blue-soft); border-color:var(--blue); color:var(--blue); font-weight:600}
+
+  .pad{padding-bottom:26px}
+
+  /* развилка: два варианта жеста */
+  .fork{display:flex; gap:14px}
+  .mini{width:300px; border:1px solid var(--g-line); border-radius:16px; overflow:hidden; background:var(--paper); color:var(--ink)}
+  .mini .cap{padding:12px 16px; font-size:.85rem; font-weight:600; border-bottom:1px solid var(--line)}
+  .mini .cap span{display:block; font-weight:400; color:var(--mut); font-size:.78rem; margin-top:3px; line-height:1.45}
+  .mini .in{padding:12px 16px 16px}
+  .hot{outline:1.5px dashed var(--blue); outline-offset:3px; border-radius:6px}
+  .hotn{outline:1.5px dashed var(--nav); outline-offset:3px; border-radius:6px}
+  .legend{display:flex; gap:14px; margin-top:12px; font-size:.75rem; color:var(--mut); flex-wrap:wrap}
+  .legend i{display:inline-block; width:12px; height:0; border-top:1.5px dashed var(--blue); margin-right:5px; vertical-align:middle}
+  .legend i.n{border-top-color:var(--nav)}
+
+  @media (max-width:760px){ .wrap{padding:28px 14px 60px} }
+</style>
+
+<div class="wrap doc">
+<header class="gal">
+  <h1>noteapp · «Документ» v3 — транскрипту можно верить</h1>
+  <p>Расширение утверждённого мира: реплику можно поправить прямо в строке, запись переслушать полосой внизу. Транскрипт остаётся документом — никаких отдельных экранов редактора и никаких модалок. Таймкод не правится ничем и никогда: на нём висит перемотка.</p>
+</header>
+<div class="row">
+
+<!-- ═══ 1. Транскрипт с плеером ═══ -->
+<figure class="board">
+<div class="phone">
+  <div class="sb"><span>18:44</span><span style="display:flex;gap:5px;align-items:center"><svg width="14" height="12" viewBox="0 0 14 12" fill="currentColor"><rect x="0" y="8" width="2.5" height="4" rx="1"/><rect x="4" y="5" width="2.5" height="7" rx="1"/><rect x="8" y="2" width="2.5" height="10" rx="1"/></svg><svg width="15" height="12" viewBox="0 0 15 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1.5 4.5a9 9 0 0 1 12 0M4 7.2a5.4 5.4 0 0 1 7 0"/><circle cx="7.5" cy="10" r="1.3" fill="currentColor" stroke="none"/></svg><svg width="20" height="11" viewBox="0 0 20 11" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="0.7" y="0.7" width="15.6" height="9.6" rx="2.5"/><rect x="2.5" y="2.5" width="9" height="6" rx="1.2" fill="currentColor" stroke="none"/><path d="M18.6 3.8v3.4" stroke-linecap="round"/></svg></span></div>
+  <div class="dt-head">
+    <div class="nav">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 19l-7-7 7-7"/></svg>
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></svg>
+    </div>
+    <h4>Созвон с Димой — релиз tgsum</h4>
+  </div>
+  <div class="metachips">
+    <span class="chip">встреча</span>
+    <span class="chip">tgsum</span>
+    <span class="chip">Дима</span>
+  </div>
+  <div class="tabs">
+    <button>Саммари</button>
+    <button>Задачи</button>
+    <button class="on">Транскрипт</button>
+  </div>
+  <div class="tr">
+    <div class="rep"><span class="tc">00:12</span><div class="col"><div class="who">Спикер 1</div><div class="txt">Слушай, по релизу tgsum — я вчера прогнал экспорт тем, там ретраи отваливаются на пятой попытке.</div></div></div>
+    <div class="rep s2"><span class="tc">00:19</span><div class="col"><div class="who">Спикер 2</div><div class="txt">Ага, я видел. Это очередь, она не переживает смену токена.</div></div></div>
+    <div class="rep now"><span class="tc">00:24</span><div class="col"><div class="who">Спикер 1</div><div class="txt">А чё ты кстати эту систему вел судом давай обсудим</div></div></div>
+    <div class="rep s2"><span class="tc">00:31</span><div class="col"><div class="who">Спикер 2</div><div class="txt">Давай. Только сначала домен продли, он двадцать четвёртого сгорает.</div></div></div>
+    <div class="rep"><span class="tc">00:38</span><div class="col"><div class="who">Спикер 1</div><div class="txt">Записал. И Семен обещал посмотреть лимиты Notion до пятницы.</div></div></div>
+  </div>
+  <div class="player">
+    <span class="pp"><svg class="ic-s" viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="5" width="3.4" height="14" rx="1.2"/><rect x="13.6" y="5" width="3.4" height="14" rx="1.2"/></svg></span>
+    <div class="bar"><i></i><b></b></div>
+    <span class="t">00:26 / 12:31</span>
+  </div>
+  <div class="statusline pad" style="margin-bottom:0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>в GitHub · 18:07</div>
+</div>
+<figcaption><b>1.</b> Транскрипт и плеер. Текущая реплика подсвечена мягким синим, полоса перемотки прижата книзу и живёт только на этой вкладке.</figcaption>
+</figure>
+
+<!-- ═══ 2. Правка реплики по месту ═══ -->
+<figure class="board">
+<div class="phone">
+  <div class="sb"><span>18:44</span><span style="display:flex;gap:5px;align-items:center"><svg width="14" height="12" viewBox="0 0 14 12" fill="currentColor"><rect x="0" y="8" width="2.5" height="4" rx="1"/><rect x="4" y="5" width="2.5" height="7" rx="1"/><rect x="8" y="2" width="2.5" height="10" rx="1"/></svg><svg width="15" height="12" viewBox="0 0 15 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1.5 4.5a9 9 0 0 1 12 0M4 7.2a5.4 5.4 0 0 1 7 0"/><circle cx="7.5" cy="10" r="1.3" fill="currentColor" stroke="none"/></svg><svg width="20" height="11" viewBox="0 0 20 11" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="0.7" y="0.7" width="15.6" height="9.6" rx="2.5"/><rect x="2.5" y="2.5" width="9" height="6" rx="1.2" fill="currentColor" stroke="none"/><path d="M18.6 3.8v3.4" stroke-linecap="round"/></svg></span></div>
+  <div class="dt-head">
+    <div class="nav">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 19l-7-7 7-7"/></svg>
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></svg>
+    </div>
+    <h4>Созвон с Димой — релиз tgsum</h4>
+  </div>
+  <div class="tabs" style="margin-top:12px">
+    <button>Саммари</button>
+    <button>Задачи</button>
+    <button class="on">Транскрипт</button>
+  </div>
+  <div class="tr">
+    <div class="rep s2"><span class="tc">00:19</span><div class="col"><div class="who">Спикер 2</div><div class="txt">Ага, я видел. Это очередь, она не переживает смену токена.</div></div></div>
+    <div class="rep edit">
+      <span class="tc">00:24</span>
+      <div class="col" style="flex:1">
+        <div class="who">Спикер 1</div>
+        <div class="field">А чё ты кстати эту систему ввёл <em style="font-style:normal;background:var(--blue-soft);border-radius:3px;padding:0 2px">(смех)</em> давай обсудим<span class="caret">&nbsp;</span></div>
+        <div class="edit-foot">
+          <span class="lock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4.5" y="10.5" width="15" height="9.5" rx="2.4"/><path d="M8 10.5V7.6a4 4 0 0 1 8 0v2.9"/></svg>таймкод не меняется</span>
+          <button class="cancel">Отмена</button>
+          <button class="save">Готово</button>
+        </div>
+      </div>
+    </div>
+    <div class="rep s2"><span class="tc">00:31</span><div class="col"><div class="who">Спикер 2</div><div class="txt">Давай. Только сначала домен продли, он двадцать четвёртого сгорает.</div></div></div>
+    <div class="rep"><span class="tc">00:38</span><div class="col"><div class="who">Спикер 1</div><div class="txt">Записал. И Семен обещал посмотреть лимиты Notion до пятницы.</div></div></div>
+  </div>
+  <div class="player">
+    <span class="pp"><svg class="ic-s" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg></span>
+    <div class="bar"><i></i><b></b></div>
+    <span class="t">00:26 / 12:31</span>
+  </div>
+  <div class="statusline pad" style="margin-bottom:0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>в GitHub · 18:07</div>
+</div>
+<figcaption><b>2.</b> Правка по месту: строка становится полем, соседние реплики остаются на экране. Таймкод виден, но погашен и подписан замком — на нём висит перемотка.</figcaption>
+</figure>
+
+<!-- ═══ 3. Правка ждёт сети ═══ -->
+<figure class="board">
+<div class="phone">
+  <div class="sb"><span>18:45</span><span style="display:flex;gap:5px;align-items:center"><svg width="14" height="12" viewBox="0 0 14 12" fill="currentColor"><rect x="0" y="8" width="2.5" height="4" rx="1"/><rect x="4" y="5" width="2.5" height="7" rx="1"/><rect x="8" y="2" width="2.5" height="10" rx="1"/></svg><svg width="15" height="12" viewBox="0 0 15 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1.5 4.5a9 9 0 0 1 12 0M4 7.2a5.4 5.4 0 0 1 7 0"/><circle cx="7.5" cy="10" r="1.3" fill="currentColor" stroke="none"/></svg><svg width="20" height="11" viewBox="0 0 20 11" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="0.7" y="0.7" width="15.6" height="9.6" rx="2.5"/><rect x="2.5" y="2.5" width="9" height="6" rx="1.2" fill="currentColor" stroke="none"/><path d="M18.6 3.8v3.4" stroke-linecap="round"/></svg></span></div>
+  <div class="dt-head">
+    <div class="nav">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 19l-7-7 7-7"/></svg>
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></svg>
+    </div>
+    <h4>Созвон с Димой — релиз tgsum</h4>
+  </div>
+  <div class="tabs" style="margin-top:12px">
+    <button>Саммари</button>
+    <button>Задачи</button>
+    <button class="on">Транскрипт</button>
+  </div>
+  <div class="tr">
+    <div class="rep s2"><span class="tc">00:19</span><div class="col"><div class="who">Спикер 2</div><div class="txt">Ага, я видел. Это очередь, она не переживает смену токена.</div></div></div>
+    <div class="rep"><span class="tc">00:24</span><div class="col"><div class="who">Спикер 1</div><div class="txt">А чё ты кстати эту систему ввёл (смех) давай обсудим</div><span class="fixed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-4-4L4 16v4Z"/></svg>поправлено вручную</span></div></div>
+    <div class="rep s2"><span class="tc">00:31</span><div class="col"><div class="who">Спикер 2</div><div class="txt">Давай. Только сначала домен продли, он двадцать четвёртого сгорает.</div></div></div>
+    <div class="rep"><span class="tc">00:38</span><div class="col"><div class="who">Спикер 1</div><div class="txt">Записал. И Семен обещал посмотреть лимиты Notion до пятницы.</div></div></div>
+  </div>
+  <div class="player">
+    <span class="pp"><svg class="ic-s" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg></span>
+    <div class="bar"><i></i><b></b></div>
+    <span class="t">00:26 / 12:31</span>
+  </div>
+  <div class="statusline queued pad" style="margin-bottom:0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>правка в очереди · уйдёт, когда появится сеть</div>
+</div>
+<figcaption><b>3.</b> Правка без сети. Текст уже свой, реплика помечена «поправлено вручную», а янтарная строка внизу — та же, что у задач: обещание, а не ошибка.</figcaption>
+</figure>
+
+<!-- ═══ 4. Предложение в словарь имён ═══ -->
+<figure class="board">
+<div class="phone">
+  <div class="sb"><span>18:46</span><span style="display:flex;gap:5px;align-items:center"><svg width="14" height="12" viewBox="0 0 14 12" fill="currentColor"><rect x="0" y="8" width="2.5" height="4" rx="1"/><rect x="4" y="5" width="2.5" height="7" rx="1"/><rect x="8" y="2" width="2.5" height="10" rx="1"/></svg><svg width="15" height="12" viewBox="0 0 15 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1.5 4.5a9 9 0 0 1 12 0M4 7.2a5.4 5.4 0 0 1 7 0"/><circle cx="7.5" cy="10" r="1.3" fill="currentColor" stroke="none"/></svg><svg width="20" height="11" viewBox="0 0 20 11" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="0.7" y="0.7" width="15.6" height="9.6" rx="2.5"/><rect x="2.5" y="2.5" width="9" height="6" rx="1.2" fill="currentColor" stroke="none"/><path d="M18.6 3.8v3.4" stroke-linecap="round"/></svg></span></div>
+  <div class="dt-head">
+    <div class="nav">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 19l-7-7 7-7"/></svg>
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></svg>
+    </div>
+    <h4>Созвон с Димой — релиз tgsum</h4>
+  </div>
+  <div class="tabs" style="margin-top:12px">
+    <button>Саммари</button>
+    <button>Задачи</button>
+    <button class="on">Транскрипт</button>
+  </div>
+  <div class="tr">
+    <div class="rep s2"><span class="tc">00:31</span><div class="col"><div class="who">Спикер 2</div><div class="txt">Давай. Только сначала домен продли, он двадцать четвёртого сгорает.</div></div></div>
+    <div class="rep"><span class="tc">00:38</span><div class="col"><div class="who">Спикер 1</div><div class="txt">Записал. И <em style="font-style:normal;background:var(--blue-soft);border-radius:3px;padding:0 2px">Сименко</em> обещал посмотреть лимиты Notion до пятницы.</div><span class="fixed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-4-4L4 16v4Z"/></svg>поправлено вручную</span></div></div>
+    <div class="rep s2"><span class="tc">00:47</span><div class="col"><div class="who">Спикер 2</div><div class="txt">Хорошо. Тогда на следующей неделе смотрим экспорт целиком.</div></div></div>
+  </div>
+  <div class="offer">
+    <svg class="ic" style="color:var(--blue);margin-top:1px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5h9a3 3 0 0 1 3 3V20a2.6 2.6 0 0 0-2.6-2.6H4Z"/><path d="M20 5.5h-1.5a3 3 0 0 0-2.5 1.4"/><path d="M20 5.5V20a2.6 2.6 0 0 0-2.6-2.6H16"/></svg>
+    <div class="col">
+      <div class="h">Добавить «Сименко» в словарь имён?</div>
+      <div class="s">Распознавание будет знать это имя заранее — в следующих записях его не придётся править.</div>
+      <div class="acts">
+        <button class="yes">Добавить</button>
+        <button>Не надо</button>
+      </div>
+    </div>
+  </div>
+  <div class="statusline pad" style="margin-bottom:0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>правка в GitHub · 18:46</div>
+</div>
+<figcaption><b>4.</b> После правки имени — непрерывающая плашка над статус-строкой. Не модалка и не тост: её можно просто не заметить и ехать дальше.</figcaption>
+</figure>
+
+</div>
+
+<div class="ask">
+  <h2>Развилка — здесь решение твоё</h2>
+  <p>Тап по реплике нужен и для перемотки («переслушать это место»), и для правки. Один жест на две задачи не разделить, поэтому есть два честных варианта. На бордах выше нарисован <b>вариант А</b>.</p>
+  <div class="fork" style="margin-top:16px">
+    <div class="mini">
+      <div class="cap">Вариант А · разделить строку<span>Таймкод перематывает, текст открывает правку. Ничего не спрятано, но зона таймкода узкая.</span></div>
+      <div class="in">
+        <div class="rep" style="border-top:none;padding-top:0">
+          <span class="tc hotn">00:24</span>
+          <div class="col"><div class="who">Спикер 1</div><div class="txt hot">А чё ты кстати эту систему вел судом давай обсудим</div></div>
+        </div>
+        <div class="legend"><span><i class="n"></i>перемотать сюда</span><span><i></i>править текст</span></div>
+      </div>
+    </div>
+    <div class="mini">
+      <div class="cap">Вариант Б · жест<span>Тап в любом месте перематывает, долгое нажатие открывает правку. Промахнуться нельзя, но правка спрятана.</span></div>
+      <div class="in">
+        <div class="rep hotn" style="border-top:none;padding-top:0;outline-offset:6px">
+          <span class="tc">00:24</span>
+          <div class="col"><div class="who">Спикер 1</div><div class="txt">А чё ты кстати эту систему вел судом давай обсудим</div></div>
+        </div>
+        <div class="legend"><span><i class="n"></i>тап — перемотать · долгий тап — править</span></div>
+      </div>
+    </div>
+  </div>
+  <ol style="margin-top:18px">
+    <li><b>Развилка выше</b> — А или Б. Я поставил А: правка редкая, но искать её в невидимом жесте на ходу неудобно, а промах по таймкоду не страшен — платформа сама расширяет зону нажатия до 48 точек.</li>
+    <li><b>Пометка «поправлено вручную»</b> (борды 3-4) — оставляем? Она честная, но это лишняя строка под каждой правленой репликой. Альтернатива — не помечать вовсе.</li>
+    <li><b>Плашка про словарь</b> (борд 4) — нужна ли, если <code>people.md</code> ты и так правишь руками на GitHub? Приложение уже умеет писать в реестр проектов, так что технически может и в имена.</li>
+    <li><b>Кнопки «пересобрать саммари» на этих бордах нет.</b> Она в тикете названа, но я её не рисовал: она тратит лимит API и трогает уже созданные задачи — это отдельное решение, не вид экрана. Если нужна — скажи, нарисую отдельным бордом.</li>
+  </ol>
+</div>
+</div>
