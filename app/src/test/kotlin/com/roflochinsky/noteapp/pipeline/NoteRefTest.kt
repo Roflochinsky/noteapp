@@ -196,6 +196,104 @@ class NoteRefTest {
         assertEquals(2, feed.mapNotNull { it.noteId }.distinct().size)
     }
 
+    /**
+     * П2 ревью: список записей идёт от свежего, поэтому неотправленная запись 18:07:41 шла первой и
+     * забирала файл, приехавший от записи 18:07:05. Владелец видел на своей записи, лежащей в
+     * очереди, чужой заголовок, чужие поля и «✓ в GitHub». Файла у неотправленной записи в репо
+     * быть НЕ МОЖЕТ — это и есть сигнал, по которому пара разбирается.
+     */
+    @Test
+    fun `неотправленная запись не забирает чужой файл`() {
+        val feed =
+            NoteRef.merge(
+                listOf(record("20260824-180741", pushed = false), record("20260824-180705")),
+                listOf(note("встречи/2026-08-24-1807-reliz-tgsum.md", vtwo)),
+            )
+        val queued = feed.single { it.noteId == "20260824-180741" }
+        assertNull("файл принадлежит записи 18:07:05", queued.path)
+        assertEquals(false, queued.pushed)
+        assertEquals("Смотри, по релизу", queued.title)
+        val sent = feed.single { it.noteId == "20260824-180705" }
+        assertEquals("встречи/2026-08-24-1807-reliz-tgsum.md", sent.path)
+    }
+
+    /**
+     * Обратная сторона того же разбора: `pushed` задаёт ПОРЯДОК разбора, а не запрет. Флажок
+     * `pushed.txt` теряется при переустановке приложения — если бы неотправленная запись файл брать
+     * не смела вовсе, файл остался бы сиротой и стал третьей строкой, то есть двойником одной из
+     * записей. Файл достаётся кому-то всегда.
+     */
+    @Test
+    fun `потерянный флажок отправки строку не раздваивает`() {
+        val feed =
+            NoteRef.merge(
+                listOf(
+                    record("20260824-180741", pushed = false),
+                    record("20260824-180705", pushed = false),
+                ),
+                listOf(note("встречи/2026-08-24-1807-reliz-tgsum.md", vtwo)),
+            )
+        assertEquals(2, feed.size)
+        assertEquals(1, feed.count { it.path != null })
+        assertEquals(2, feed.mapNotNull { it.noteId }.distinct().size)
+    }
+
+    /**
+     * Какой файл достаётся какой записи — закреплено, а не «как ляжет»: записи разбирают файлы в
+     * порядке ленты, файлы — в порядке репо. Пока это не закреплено, разбор можно перевернуть и
+     * гейт останется зелёным (выжившая мутация ревью), а владелец получит перепутанные заголовки.
+     */
+    @Test
+    fun `разбор пар одной минуты детерминирован`() {
+        val feed =
+            NoteRef.merge(
+                listOf(record("20260824-180741"), record("20260824-180705")),
+                listOf(
+                    note("встречи/2026-08-24-1807-reliz-tgsum.md", vtwo),
+                    note("идеи/2026-08-24-1807-eksport.md", vtwo),
+                ),
+            )
+        assertEquals(
+            mapOf(
+                "20260824-180741" to "встречи/2026-08-24-1807-reliz-tgsum.md",
+                "20260824-180705" to "идеи/2026-08-24-1807-eksport.md",
+            ),
+            feed.associate { it.noteId to it.path },
+        )
+    }
+
+    /**
+     * Ключ склеенной строки — id записи, и приоритет в [FeedItem.key] закреплён именно этим:
+     * переверни его на «путь файла первым» — и переименование Action-ом сменит ключ строки, то есть
+     * выкинет владельца с открытой деталки обратно в ленту. Проверяется настоящей парой «до и после
+     * переноса»: путь меняется, ключ обязан остаться.
+     */
+    @Test
+    fun `переименование Action-ом ключ склеенной строки не меняет`() {
+        val local = listOf(record("20260826-091405"))
+        val before =
+            NoteRef.merge(
+                    local,
+                    listOf(
+                        note(
+                            "inbox/2026-08-26-0914.md",
+                            ActionFixture.text("note-raw-with-tasks.md"),
+                        )
+                    ),
+                )
+                .single()
+        val after =
+            NoteRef.merge(
+                    local,
+                    listOf(note(movedTo(), ActionFixture.text("note-done-with-tasks.md"))),
+                )
+                .single()
+        assertEquals("inbox/2026-08-26-0914.md", before.path)
+        assertEquals("встречи/2026-08-26-0914-limity-retraev.md", after.path)
+        assertEquals("20260826-091405", after.key)
+        assertEquals(before.key, after.key)
+    }
+
     @Test
     fun `заметка из репо без локальной записи в ленте есть`() {
         val feed = NoteRef.merge(emptyList(), listOf(note("идеи/2026-08-12-1922-notion.md", vone)))

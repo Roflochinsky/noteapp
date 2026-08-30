@@ -229,6 +229,20 @@ class DetailScreenTest {
         compose.onNodeWithText("участники").assertDoesNotExist()
     }
 
+    /**
+     * Файл не нашего формата (без frontmatter) лента показывает — но править его нельзя: `Edit`
+     * ставит поля внутрь frontmatter, а его нет, и правка молча ничего не делает. Пока чипы
+     * рисовались, владелец жал их вхолостую и без единого сообщения.
+     */
+    @Test
+    fun `у файла без frontmatter полей нет`() {
+        val alien = NoteFile.Note("встречи/2026-08-24-1807-chuzhoy.md", emptyMap(), "просто текст")
+        screen(item = FeedItem("20260824-1807", null, alien))
+        compose.onNodeWithText("тип").assertDoesNotExist()
+        compose.onNodeWithText("участники").assertDoesNotExist()
+        assertNull(edit)
+    }
+
     /** Пока файла в репо нет, править нечего: чипы не рисуются, а не врут пустыми значениями. */
     @Test
     fun `у записи без файла в репо полей нет`() {

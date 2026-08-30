@@ -113,8 +113,11 @@ fun DetailScreen(
     Column(Modifier.fillMaxSize()) {
         Head(item.title.ifEmpty { "Заметка" }, onBack)
         // Заметку из `inbox/` не правим: её прямо сейчас обрабатывает Action (решение LLD-7).
+        // Пустые `fields` — файл не нашего формата (без frontmatter): лента его показывает, но
+        // ставить поля некуда, `Edit` молча вернул бы текст как есть. Чип, который ничего не делает
+        // и ничего не говорит, хуже отсутствующего.
         item.note
-            ?.takeIf { NoteRef.isEditable(it.path) }
+            ?.takeIf { NoteRef.isEditable(it.path) && it.fields.isNotEmpty() }
             ?.let { MetaChips(it, people, projects, onEdit) }
         TabRow(
             selectedTabIndex = tab,
