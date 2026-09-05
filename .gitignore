@@ -9,6 +9,9 @@ local.properties
 __pycache__/
 *.pyc
 
+# Результаты bin/stt-bench: расшифровки личной записи владельца
+stt-bench-out/
+
 # Секреты
 .env
 *.keystore

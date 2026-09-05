@@ -1,0 +1,8 @@
+# Словарь имён для bin/stt-bench: по одному термину в строке, строки с # игнорируются.
+# Копию с реальными именами держать ВНЕ репозитория (это личные данные владельца):
+#   cp docs/research/stt-bench-words.example.txt ~/stt-words.txt && $EDITOR ~/stt-words.txt
+# Лимиты вендоров (самый жёсткий — AssemblyAI, 200): фразы не длиннее 6 слов, до 200 строк.
+Сименко
+noteapp
+Deepgram
+OnePlus

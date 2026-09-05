@@ -13,6 +13,7 @@
 | Приложение (Kotlin) | `JAVA_HOME=~/.local/java/jdk17 ./gradlew ktfmtCheck detekt lint testDebugUnitTest assembleDebug` |
 | GitHub Actions | `actionlint docs/examples/process-notes.yml` (эталон для репо заметок; своих workflow у репо нет) |
 | Хуки харнесса | `python3 .claude/hooks/tests/test_destructive_fs_guard.py` |
+| Стенд STT | `bin/stt-bench --selftest` (сеть и ключи не нужны) |
 | Всё разом (гигиена) | `pre-commit run --all-files` |
 
 **Чем блок «Приложение» падает не по делу** (за ночь 2026-08-26 на это налетели двое):

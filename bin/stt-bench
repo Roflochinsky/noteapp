@@ -1,0 +1,583 @@
+#!/usr/bin/env python3
+"""Стенд для тикета nikitatrubaev-7cy.1 — шесть STT на ОДНОЙ записи, каждый дважды:
+без словаря имён и со словарём. Судит владелец глазами, стенд только раскладывает.
+
+    bin/stt-bench ЗАПИСЬ СЛОВАРЬ.txt            боевой прогон (нужны ключи в окружении)
+    bin/stt-bench ЗАПИСЬ СЛОВАРЬ.txt --dry-run  ничего не отправляет: показывает, какие
+                                                варианты доступны и что именно уйдёт
+    bin/stt-bench --selftest                    проверка собственной логики, без сети
+
+Ключи берутся ТОЛЬКО из окружения и никуда не пишутся: в сухом прогоне вместо ключа
+печатается имя переменной. Нет ключа — вариант пропускается строкой в таблице, остальные
+идут дальше. Любой отказ вендора тоже остаётся строкой в таблице, прогон не падает.
+
+На выходе в каталоге --out:
+    NN-вариант-(slovar|bez).json  сырой ответ вендора целиком — это половина ценности
+                                  стенда: форма JSON, пословные таймкоды, имена спикеров
+                                  нужны тикетам 7cy.2 и 7cy.3;
+    NN-вариант-(slovar|bez).md    расшифровка репликами;
+    summary.md                    сводка: спорные места рядом, цена, время, снятые факты.
+"""
+
+import argparse
+import difflib
+import json
+import mimetypes
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from pathlib import Path
+
+DRY = False
+AUDIO = b""  # тело записи читается один раз
+
+# Фразы, правильный текст которых владелец помнит. Ради них и затевалось: в сводке они
+# вынесены наверх, чтобы не искать по простыне. Добавить свою — флаг --probe.
+PROBES = [
+    "Сименко",
+    "а чё ты кстати эту систему ввёл давай обсудим",
+]
+
+# $/мин по прайсам вендоров на 2026-08-24 (docs/research/stt-choice.md, раздел 2).
+# Цифры для порядка величины, а не для бухгалтерии.
+RATES = {
+    "deepgram-multi": 0.0052,
+    "deepgram-ru": 0.0043,
+    "assemblyai": 0.0028,  # $0.15/ч + $0.02/ч диаризация
+    "speechmatics": 0.0067,  # Enhanced $0.40/ч
+    "elevenlabs": 0.0037,  # $0.22/ч; со словарём +20% (наценка за keyterms)
+    "openai": 0.0060,
+}
+
+
+class Skip(Exception):
+    """Вариант не гоняем и говорим почему (нет ключа, нет механизма словаря)."""
+
+
+# ---------------------------------------------------------------- HTTP (только stdlib)
+
+
+def key(env):
+    if not os.environ.get(env):
+        raise Skip(f"нет ${env}, пропущено")
+    # В сухом прогоне ключ не нужен и не должен попасть в вывод — отдаём имя переменной.
+    return f"<${env}>" if DRY else os.environ[env]
+
+
+def mime(path):
+    return mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+
+
+def multipart(fields, files):
+    """fields: {имя: строка}, files: {имя: (filename, content-type, bytes)}."""
+    b = "----stt-bench-" + uuid.uuid4().hex
+    out = bytearray()
+    for k, v in fields.items():
+        out += f'--{b}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode()
+    for k, (name, ctype, blob) in files.items():
+        out += (
+            f'--{b}\r\nContent-Disposition: form-data; name="{k}"; filename="{name}"\r\n'
+            f"Content-Type: {ctype}\r\n\r\n"
+        ).encode()
+        out += blob + b"\r\n"
+    out += f"--{b}--\r\n".encode()
+    return bytes(out), f"multipart/form-data; boundary={b}"
+
+
+def call(method, url, headers, body=None, ctype=None, note=None, stub=None):
+    """Один запрос. В сухом прогоне печатает его и отдаёт заглушку stub."""
+    if DRY:
+        print(f"    {method} {url}")
+        for k, v in headers.items():
+            print(f"      {k}: {v}")
+        if ctype:
+            print(f"      Content-Type: {ctype}")
+        if note:
+            print(f"      {note}")
+        return {} if stub is None else stub
+    req = urllib.request.Request(url, data=body, method=method)
+    for k, v in headers.items():
+        req.add_header(k, v)
+    if ctype:
+        req.add_header("Content-Type", ctype)
+    try:
+        with urllib.request.urlopen(req, timeout=1800) as r:
+            return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"HTTP {e.code}: {e.read()[:300].decode(errors='replace')}") from None
+
+
+def poll(fetch, done, every=5, limit=1800):
+    if DRY:
+        return {}
+    t0 = time.monotonic()
+    while True:
+        r = fetch()
+        if done(r):
+            return r
+        if time.monotonic() - t0 > limit:
+            raise RuntimeError("таймаут ожидания задания")
+        time.sleep(every)
+
+
+def body_note(audio):
+    size = len(AUDIO) if AUDIO else (audio.stat().st_size if audio.exists() else 0)
+    return f"тело: {audio.name}, {size} байт"
+
+
+# --------------------------------------------------------------------- шесть вариантов
+# Каждая функция: (запись, термины словаря) -> (сырой ответ, список реплик).
+# Механизм словаря у всех свой — имена и лимиты выверены по докам вендоров (2026-08-30),
+# см. docs/research/stt-bench-checklist.md.
+
+
+def deepgram(audio, terms, language):
+    # keyterm: nova-3 (моно и multi), до 500 токенов на запрос, параметр повторяется.
+    # Набор параметров = ровно то, что шлёт приложение (DeepgramClient.kt) — это контроль.
+    q = {
+        "model": "nova-3",
+        "language": language,
+        "diarize": "true",
+        "utterances": "true",
+        "punctuate": "true",
+        "smart_format": "true",
+    }
+    url = "https://api.deepgram.com/v1/listen?" + urllib.parse.urlencode(q)
+    url += "".join("&keyterm=" + urllib.parse.quote(t) for t in terms)
+    raw = call(
+        "POST",
+        url,
+        {"Authorization": "Token " + key("DEEPGRAM_API_KEY")},
+        body=AUDIO,
+        ctype=mime(audio),
+        note=body_note(audio),
+        stub={"results": {}},
+    )
+    res = raw.get("results", {})
+    lines = [f"Спикер {u['speaker'] + 1}: {u['transcript']}" for u in res.get("utterances") or []]
+    if not lines:
+        alts = (res.get("channels") or [{}])[0].get("alternatives") or [{}]
+        lines = [alts[0].get("transcript", "")]
+    return raw, lines
+
+
+def assemblyai(audio, terms):
+    # keyterms_prompt: до 200 терминов для universal-2, не больше 6 слов во фразе.
+    h = {"authorization": key("ASSEMBLYAI_API_KEY")}
+    up = call(
+        "POST",
+        "https://api.assemblyai.com/v2/upload",
+        h,
+        body=AUDIO,
+        ctype="application/octet-stream",
+        note=body_note(audio),
+        stub={"upload_url": "<upload_url>"},
+    )
+    body = {
+        "audio_url": up["upload_url"],
+        "language_code": "ru",
+        "speaker_labels": True,
+        "punctuate": True,
+        "speech_models": ["universal-2"],
+    }
+    if terms:
+        body["keyterms_prompt"] = terms[:200]
+    job = call(
+        "POST",
+        "https://api.assemblyai.com/v2/transcript",
+        h,
+        body=json.dumps(body).encode(),
+        ctype="application/json",
+        note=json.dumps(body, ensure_ascii=False)[:600],
+        stub={"id": "<transcript_id>"},
+    )
+    url = f"https://api.assemblyai.com/v2/transcript/{job['id']}"
+    raw = poll(lambda: call("GET", url, h), lambda r: r.get("status") in ("completed", "error"))
+    if raw.get("status") == "error":
+        raise RuntimeError(raw.get("error", "ошибка транскрипции"))
+    lines = [f"Спикер {u['speaker']}: {u['text']}" for u in raw.get("utterances") or []]
+    return raw, lines or [raw.get("text", "")]
+
+
+def speechmatics(audio, terms):
+    # additional_vocab: до 1000 записей, не больше 6 слов в записи; можно sounds_like.
+    h = {"Authorization": "Bearer " + key("SPEECHMATICS_API_KEY")}
+    cfg = {
+        "type": "transcription",
+        "transcription_config": {
+            "language": "ru",
+            "operating_point": "enhanced",
+            "diarization": "speaker",
+        },
+    }
+    if terms:
+        cfg["transcription_config"]["additional_vocab"] = [{"content": t} for t in terms[:1000]]
+    body, ct = multipart(
+        {"config": json.dumps(cfg, ensure_ascii=False)},
+        {"data_file": (audio.name, mime(audio), AUDIO)},
+    )
+    base = "https://eu1.asr.api.speechmatics.com/v2/jobs"
+    job = call(
+        "POST",
+        base,
+        h,
+        body=body,
+        ctype=ct,
+        note="config=" + json.dumps(cfg, ensure_ascii=False)[:600] + "; " + body_note(audio),
+        stub={"id": "<job_id>"},
+    )
+    poll(
+        lambda: call("GET", f"{base}/{job['id']}", h),
+        lambda r: r.get("job", {}).get("status") in ("done", "rejected", "expired"),
+    )
+    raw = call("GET", f"{base}/{job['id']}/transcript?format=json-v2", h, stub={"results": []})
+    lines, speaker, buf = [], None, ""
+    for item in raw.get("results") or []:
+        alt = (item.get("alternatives") or [{}])[0]
+        who = alt.get("speaker", "?")
+        text = alt.get("content", "")
+        if who != speaker and item.get("type") != "punctuation":
+            if buf.strip():
+                lines.append(f"Спикер {speaker}: {buf.strip()}")
+            speaker, buf = who, ""
+        buf += text if item.get("type") == "punctuation" else " " + text
+    if buf.strip():
+        lines.append(f"Спикер {speaker}: {buf.strip()}")
+    return raw, lines
+
+
+def elevenlabs(audio, terms):
+    # keyterms: до 1000 терминов по 50 символов; включение добавляет +20% к цене прогона.
+    fields = {
+        "model_id": "scribe_v2",
+        "language_code": "rus",
+        "diarize": "true",
+        "tag_audio_events": "true",  # ради «(смех)» в спорной фразе
+        "timestamps_granularity": "word",
+    }
+    if terms:
+        fields["keyterms"] = json.dumps(terms[:1000], ensure_ascii=False)
+    body, ct = multipart(fields, {"file": (audio.name, mime(audio), AUDIO)})
+    raw = call(
+        "POST",
+        "https://api.elevenlabs.io/v1/speech-to-text",
+        {"xi-api-key": key("ELEVENLABS_API_KEY")},
+        body=body,
+        ctype=ct,
+        note=json.dumps(fields, ensure_ascii=False)[:600] + "; " + body_note(audio),
+        stub={"words": []},
+    )
+    lines, speaker, buf = [], None, ""
+    for w in raw.get("words") or []:
+        who = w.get("speaker_id", "?")
+        if who != speaker and w.get("type") != "spacing":
+            if buf.strip():
+                lines.append(f"Спикер {speaker}: {buf.strip()}")
+            speaker, buf = who, ""
+        buf += w.get("text", "")
+    if buf.strip():
+        lines.append(f"Спикер {speaker}: {buf.strip()}")
+    return raw, lines or [raw.get("text", "")]
+
+
+def openai(audio, terms):
+    if terms:
+        # Факт из доков (2026-08-30): у gpt-4o-transcribe-diarize параметр prompt не
+        # поддерживается, другого механизма словаря у модели нет. Это ответ для ADR, а не
+        # поломка стенда: сравнивать со словарём не с чем.
+        raise Skip("у gpt-4o-transcribe-diarize нет механизма словаря (prompt не поддерживается)")
+    fields = {
+        "model": "gpt-4o-transcribe-diarize",
+        "response_format": "diarized_json",
+        "chunking_strategy": "auto",
+    }
+    body, ct = multipart(fields, {"file": (audio.name, mime(audio), AUDIO)})
+    raw = call(
+        "POST",
+        "https://api.openai.com/v1/audio/transcriptions",
+        {"Authorization": "Bearer " + key("OPENAI_API_KEY")},
+        body=body,
+        ctype=ct,
+        note=json.dumps(fields, ensure_ascii=False) + "; " + body_note(audio),
+        stub={"segments": []},
+    )
+    segments = raw.get("segments") or []
+    lines = [f"Спикер {s.get('speaker', '?')}: {s.get('text', '')}" for s in segments]
+    return raw, lines or [raw.get("text", "")]
+
+
+VARIANTS = [
+    (
+        "deepgram-multi",
+        "Deepgram nova-3 language=multi (контроль, как в приложении)",
+        lambda a, t: deepgram(a, t, "multi"),
+    ),
+    ("deepgram-ru", "Deepgram nova-3 language=ru", lambda a, t: deepgram(a, t, "ru")),
+    ("assemblyai", "AssemblyAI universal-2 + speaker_labels", assemblyai),
+    ("speechmatics", "Speechmatics enhanced + diarization", speechmatics),
+    ("elevenlabs", "ElevenLabs Scribe v2", elevenlabs),
+    ("openai", "OpenAI gpt-4o-transcribe-diarize", openai),
+]
+
+
+# ------------------------------------------------------------- спорные места и факты
+
+
+def normw(word):
+    return re.sub(r"[^\w]", "", word.lower().replace("ё", "е"))
+
+
+def best_window(text, probe):
+    """Кусок расшифровки, больше всего похожий на фразу, которую владелец помнит."""
+    toks = text.split()
+    ntoks = [normw(t) for t in toks]
+    p = " ".join(normw(w) for w in probe.split() if normw(w))
+    n = len(probe.split())
+    best = (0.0, "—")
+    for size in {max(1, n - 2), max(1, n - 1), n, n + 1, n + 2}:
+        for i in range(0, max(1, len(toks) - size + 1)):
+            window = " ".join(ntoks[i : i + size])
+            r = difflib.SequenceMatcher(None, p, window).ratio()
+            if r > best[0]:
+                best = (r, " ".join(toks[i : i + size]))
+    return best
+
+
+def scan(obj, key_names, out):
+    """Собрать значения указанных ключей по всему JSON — на любой глубине и форме."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k in key_names and not isinstance(v, (dict, list)):
+                out.add(v)
+            scan(v, key_names, out)
+    elif isinstance(obj, list):
+        for v in obj:
+            scan(v, key_names, out)
+    return out
+
+
+def has_word_times(obj):
+    """Есть ли в ответе пословные таймкоды (нужно тикету 7cy.3)."""
+    if isinstance(obj, dict):
+        started = "start" in obj or "start_time" in obj
+        worded = "word" in obj or "text" in obj or "content" in obj
+        return (started and worded) or any(has_word_times(v) for v in obj.values())
+    if isinstance(obj, list):
+        return any(has_word_times(v) for v in obj)
+    return False
+
+
+def audio_minutes(path, given):
+    if given:
+        return given
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=nw=1:nk=1", str(path)],
+            capture_output=True, text=True, timeout=60, check=True,
+        )
+        return float(out.stdout.strip()) / 60
+    except Exception:
+        return None
+
+
+# ------------------------------------------------------------------------------ прогон
+
+
+def main(argv):
+    global DRY, AUDIO
+    ap = argparse.ArgumentParser(description="Шесть STT на одной записи, каждый дважды.")
+    ap.add_argument("audio", nargs="?", type=Path, help="запись владельца")
+    ap.add_argument("words", nargs="?", type=Path, help="словарь имён, по одному в строке")
+    ap.add_argument("--out", type=Path, default=Path("stt-bench-out"))
+    ap.add_argument("--dry-run", action="store_true", help="ничего не отправлять")
+    ap.add_argument("--only", default="", help="гонять только варианты, чьё имя содержит это")
+    ap.add_argument("--minutes", type=float, help="длительность записи, если нет ffprobe")
+    ap.add_argument("--probe", action="append", help="ещё одна спорная фраза (можно несколько)")
+    ap.add_argument("--selftest", action="store_true", help="проверить логику стенда")
+    a = ap.parse_args(argv)
+
+    if a.selftest:
+        return selftest()
+    if not a.audio or not a.words:
+        ap.error("нужны ЗАПИСЬ и СЛОВАРЬ (или --selftest)")
+
+    DRY = a.dry_run
+    probes = PROBES + (a.probe or [])
+    terms = []
+    if a.words.exists():
+        terms = [ln.strip() for ln in a.words.read_text().splitlines()
+                 if ln.strip() and not ln.startswith("#")]
+    elif not DRY:
+        ap.error(f"нет файла словаря: {a.words}")
+    if not DRY:
+        if not a.audio.exists():
+            ap.error(f"нет записи: {a.audio}")
+        AUDIO = a.audio.read_bytes()
+
+    minutes = a.minutes if DRY else audio_minutes(a.audio, a.minutes)
+    a.out.mkdir(parents=True, exist_ok=True)
+    length = f" (~{minutes:.1f} мин)" if minutes else " (длительность неизвестна)"
+    print(f"запись: {a.audio}{length}")
+    print(f"словарь: {len(terms)} терминов из {a.words}")
+    print(f"каталог: {a.out}" + ("  [СУХОЙ ПРОГОН — ничего не отправляется]" if DRY else ""))
+
+    rows, n = [], 0
+    for slug, title, fn in VARIANTS:
+        for withdict in (False, True):
+            n += 1
+            if a.only and a.only not in slug:
+                continue
+            tag = "со словарём" if withdict else "без словаря"
+            name = f"{n:02d}-{slug}-{'slovar' if withdict else 'bez'}"
+            print(f"\n[{n}/12] {title} · {tag}")
+            row = {"вариант": title, "словарь": tag, "статус": "", "сек": "", "$": "",
+                   "спикеры": "", "таймкоды": "", "сырой ответ": ""}
+            t0 = time.monotonic()
+            try:
+                raw, lines = fn(a.audio, terms if withdict else [])
+            except Skip as e:
+                row["статус"] = str(e)
+                print(f"    пропуск: {e}")
+                rows.append((row, {}))
+                continue
+            except Exception as e:  # сеть, лимит, отказ вендора — вариант падает сам за себя
+                row["статус"] = f"ошибка: {str(e)[:200]}"
+                print(f"    ошибка: {str(e)[:200]}")
+                rows.append((row, {}))
+                continue
+            if DRY:
+                row["статус"] = "сухой прогон"
+                rows.append((row, {}))
+                continue
+
+            secs = time.monotonic() - t0
+            (a.out / f"{name}.json").write_text(json.dumps(raw, ensure_ascii=False, indent=1))
+            text = "\n".join(lines)
+            (a.out / f"{name}.md").write_text(f"# {title} — {tag}\n\n{text}\n")
+            rate = RATES[slug] * (1.2 if withdict and slug == "elevenlabs" else 1)
+            row["статус"] = "ок"
+            row["сек"] = f"{secs:.0f}"
+            row["$"] = f"{rate * minutes:.3f}" if minutes else "—"
+            speakers = sorted(str(s) for s in scan(raw, {"speaker", "speaker_id"}, set()))
+            row["спикеры"] = ", ".join(speakers[:8]) or "нет"
+            row["таймкоды"] = "да" if has_word_times(raw) else "нет"
+            row["сырой ответ"] = f"{name}.json"
+            # искать спорное место по голому тексту, без префиксов «Спикер N:»
+            bare = re.sub(r"(?m)^Спикер \S+: ", "", text)
+            rows.append((row, {p: best_window(bare, p) for p in probes}))
+            print(f"    ок, {secs:.0f} с, {len(lines)} реплик → {name}.md")
+
+    (a.out / "summary.md").write_text(report(rows, probes, a.audio, minutes, len(terms), DRY))
+    print(f"\nсводка: {a.out / 'summary.md'}")
+    return 0
+
+
+def table(header, lines):
+    out = ["| " + " | ".join(header) + " |", "|" + "|".join("---" for _ in header) + "|"]
+    out += ["| " + " | ".join(str(c).replace("|", "/") for c in row) + " |" for row in lines]
+    return "\n".join(out)
+
+
+def report(rows, probes, audio, minutes, nterms, dry):
+    head = [f"# Смоук STT — {time.strftime('%Y-%m-%d %H:%M')}", "",
+            f"Запись: `{audio.name}`" + (f", ~{minutes:.1f} мин" if minutes else ""),
+            f"Словарь: {nterms} терминов. Судит владелец глазами — сравнивать столбец «услышано».",
+            ""]
+    if dry:
+        head.append("**Сухой прогон: ни один запрос не отправлен.**\n")
+    parts = ["\n".join(head), "## Спорные места\n"]
+
+    for p in probes:
+        parts.append(f"### «{p}»\n")
+        lines = []
+        for row, best in rows:
+            r, frag = best.get(p, (0.0, row["статус"]))
+            lines.append([row["вариант"], row["словарь"], frag, f"{r:.2f}" if best.get(p) else "—"])
+        parts.append(table(["вариант", "словарь", "услышано", "похоже"], lines) + "\n")
+
+    parts.append("## Прогоны\n")
+    parts.append(table(
+        ["вариант", "словарь", "статус", "сек", "≈$"],
+        [[r["вариант"], r["словарь"], r["статус"], r["сек"], r["$"]] for r, _ in rows]) + "\n")
+
+    parts.append("## Факты для 7cy.2 и 7cy.3\n")
+    parts.append(table(
+        ["вариант", "словарь", "как зовут спикеров", "пословные таймкоды", "сырой ответ"],
+        [[r["вариант"], r["словарь"], r["спикеры"], r["таймкоды"], r["сырой ответ"]]
+         for r, _ in rows if r["сырой ответ"]]) + "\n")
+    return "\n".join(parts)
+
+
+# ------------------------------------------------------------------------- самопроверка
+
+
+def selftest():
+    """Проверяет ровно то, что может незаметно сломаться: поиск спорного места, сборку
+    multipart, разбор чужого JSON. Фикстура — живой ответ Deepgram из docs/research."""
+    r, frag = best_window("Смотрю, был там Семенко и ещё кто-то. Дальше не помню.", "Сименко")
+    assert "Семенко" in frag, frag
+    assert 0.5 < r < 1.0, r
+    r2, frag2 = best_window(
+        "потом он сказал а чё ты кстати эту систему ввёл смех давай обсудим и ушёл",
+        "а чё ты кстати эту систему ввёл давай обсудим")
+    assert "давай обсудим" in frag2 and "кстати" in frag2, frag2
+    assert r2 > 0.8, r2
+
+    body, ct = multipart({"config": '{"a":1}'}, {"data_file": ("z.m4a", "audio/mp4", b"\x00\x01")})
+    assert ct.startswith("multipart/form-data; boundary=----stt-bench-")
+    assert b'name="config"' in body and b'filename="z.m4a"' in body and b"\x00\x01" in body
+    assert body.endswith(ct.split("boundary=")[1].encode() + b"--\r\n")
+
+    fx = Path(__file__).resolve().parent.parent / "docs/research/deepgram-sample-response.json"
+    raw = json.loads(fx.read_text())
+    assert has_word_times(raw) is True
+    assert scan(raw, {"speaker", "speaker_id"}, set()) == {0}
+    assert has_word_times({"a": [{"start": 1}]}) is False
+
+    os.environ.pop("ZZZ_TEST_KEY", None)
+    try:
+        key("ZZZ_TEST_KEY")
+        raise AssertionError("нет ключа — должен быть Skip")
+    except Skip as e:
+        assert "ZZZ_TEST_KEY" in str(e)
+
+    # Разбор ответов в реплики: Deepgram — на живой фикстуре, склейка по спикерам у
+    # Speechmatics и ElevenLabs — на минимальных образцах их документированной формы.
+    global call, DRY
+    real_call, DRY = call, True  # DRY здесь только чтобы poll() не ждал чужой сервер
+    try:
+        for env in ("DEEPGRAM_API_KEY", "SPEECHMATICS_API_KEY", "ELEVENLABS_API_KEY"):
+            os.environ.setdefault(env, "selftest")
+        call = lambda *a, **k: raw  # noqa: E731
+        assert deepgram(fx, [], "multi")[1][0].startswith("Спикер 1: Смотрю"), "Deepgram"
+
+        sm = {"id": "x", "results": [
+            {"type": "word", "alternatives": [{"content": "Привет", "speaker": "S1"}]},
+            {"type": "punctuation", "alternatives": [{"content": ",", "speaker": "S1"}]},
+            {"type": "word", "alternatives": [{"content": "да", "speaker": "S2"}]}]}
+        call = lambda *a, **k: sm  # noqa: E731
+        assert speechmatics(fx, [])[1] == ["Спикер S1: Привет,", "Спикер S2: да"], "Speechmatics"
+
+        el = {"words": [
+            {"type": "word", "text": "Привет", "speaker_id": "speaker_0"},
+            {"type": "spacing", "text": " ", "speaker_id": "speaker_0"},
+            {"type": "audio_event", "text": "(смех)", "speaker_id": "speaker_0"},
+            {"type": "word", "text": "да", "speaker_id": "speaker_1"}]}
+        call = lambda *a, **k: el  # noqa: E731
+        assert elevenlabs(fx, [])[1] == ["Спикер speaker_0: Привет (смех)", "Спикер speaker_1: да"]
+    finally:
+        call, DRY = real_call, False
+
+    print("selftest: ок")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
