@@ -122,11 +122,18 @@ def main():
     )
     ready_ids = {i["id"] for i in json.loads(rdy.stdout)} if rdy.returncode == 0 else set()
 
-    cand = []
+    cand, busy = [], []
+    taken_files, taken_locks = set(), set()
     for i in issues:
-        if i.get("status") not in ("open", "blocked"):
-            continue
+        status = i.get("status")
         f = touches(i, repo)
+        if status == "in_progress":  # взятый срез держит свои файлы и замки, в потолок не входит
+            busy.append((i["id"], (i.get("title") or "")[:60], f))
+            taken_files |= set(f)
+            taken_locks |= locks(f)
+            continue
+        if status not in ("open", "blocked"):
+            continue
         cand.append(
             (
                 i["id"],
@@ -135,16 +142,20 @@ def main():
                 locks(f),
                 i["id"] in ready_ids,
                 (i.get("title") or "")[:60],
+                status,
             )
         )
     cand.sort(key=lambda c: (not c[4], c[1], c[0]))
 
-    taken_files, taken_locks, chosen, waiting = set(), set(), [], []
-    for cid, _pri, f, lk, isready, title in cand:
+    chosen, waiting = [], []
+    for cid, _pri, f, lk, isready, title, status in cand:
         if not isready:
-            waiting.append(
-                (cid, title, "заблокирован (bd ready не отдаёт: зависимость или status=blocked)")
+            why = (
+                "status=blocked (снять — bd update --status=open)"
+                if status == "blocked"
+                else "ждёт зависимости (bd ready не отдаёт)"
             )
+            waiting.append((cid, title, why))
             continue
         if not f:
             waiting.append(
@@ -164,6 +175,10 @@ def main():
             taken_files |= set(f)
             taken_locks |= lk
 
+    if busy:
+        print(f"=== В РАБОТЕ ({len(busy)}) — их файлы заняты ===")
+        for cid, title, f in busy:
+            print(f"  {cid:22s} {title}\n      файлы: {', '.join(f) or '—'}")
     print(f"=== МОЖНО ПУСТИТЬ СЕЙЧАС ({len(chosen)} из потолка {a.max}) ===")
     for cid, title, f, lk in chosen:
         print(f"  {cid:22s} {title}")

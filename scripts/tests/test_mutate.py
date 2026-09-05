@@ -451,6 +451,7 @@ def test_strip_params_only_trailing_block() -> None:
     assert mod._strip_params("список [a, b] сортируется") == "список [a, b] сортируется"
     assert mod._strip_params("параметризованный[1]") == "параметризованный"
     assert mod.matches("com.x.T::список [a, b] сортируется", "T::список [c] пуст") is False
+    assert mod.matches("com.x.T::name[1]", "T::name") is True
 
 
 def test_missing_gate_refuses(repo: Path) -> None:

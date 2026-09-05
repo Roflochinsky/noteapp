@@ -381,7 +381,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         if not mutations:
             raise Refusal(f"мутации с id {args.only} в спеке нет")
 
-    for tests in dict.fromkeys(m.tests for m in [*mutations, control]):
+    filters = [m.tests for m in [*mutations, control]] + ([""] if args.scope == "full" else [])
+    for tests in dict.fromkeys(filters):
         baseline(root, tests)
 
     journal = root / JOURNAL_DIR / args.id
@@ -418,6 +419,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not control_outcome.killed:
         print("ОТКАЗ: управляющая мутация не убита — сломан харнесс, а не код", file=sys.stderr)
         return REFUSAL
+    if full is not None and not full.killed:
+        print(
+            "полный набор под управляющей упал шире заявленного теста — стражи пересекаются",
+            file=sys.stderr,
+        )
+        return SURVIVOR
     return SURVIVOR if any(not o.killed for o in outcomes) else OK
 
 
