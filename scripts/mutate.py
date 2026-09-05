@@ -291,7 +291,8 @@ def baseline(root: Path, tests: str) -> None:
     probe = verdict(output, cases, Mutation("baseline", "", "", "-", "", tests, "-::-"))
     if probe.invalid:
         raise Refusal(
-            f"базовый прогон фильтра {tests!r} невалиден — задача из кэша, отчётов нет или сборка упала"
+            f"базовый прогон фильтра {tests!r} невалиден — "
+            "задача из кэша, отчётов нет или сборка упала"
         )
     if probe.failed:
         raise Refusal(
