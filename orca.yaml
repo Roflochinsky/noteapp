@@ -1,0 +1,21 @@
+# Конфигурация Orca для этого репозитория (перенос харнеса формы 2 из workwatch, F4;
+# пилот — скилл epic-orca). Схема: worktree.sharedDirectories, scripts.setup / scripts.archive.
+
+worktree:
+  # Общих каталогов нет: Gradle держит зависимости и кэш сборки в ~/.gradle, он один на все
+  # деревья (CLAUDE.md → org.gradle.caching). Единственное, чего нет в свежем дереве, —
+  # local.properties (не в git), его копирует .worktreeinclude и подстраховывает bin/gate.
+  sharedDirectories: []
+
+scripts:
+  # Выполняется при создании дерева (worker-start --setup run).
+  setup: |
+    set -uo pipefail
+    # 1. local.properties (sdk.dir) — без него Gradle падает на «SDK location not found».
+    [ -f local.properties ] || cp ~/code/noteapp/local.properties . || echo "ВНИМАНИЕ: local.properties не скопирован"
+    # 2. База — локальная ветка main основного чекаута (пуш один раз при закрытии сессии,
+    #    origin/main внутри эпика отстаёт). Голое имя через первый remote — ловушка.
+    counts="$(git rev-list --left-right --count main...HEAD 2>/dev/null || echo '? ?')"
+    echo "база относительно main (отстаёт/впереди): $counts"
+  archive: |
+    echo "дерево архивируется: $PWD"

@@ -16,3 +16,16 @@ stt-bench-out/
 .env
 *.keystore
 .kotlin/
+.beads
+
+# журнал мутационных прогонов scripts/mutate.py
+.mutations/
+
+# Черновики харнесса: полный вывод гейтов, кадры и скрипты-помощники живут в скратчпаде сессии
+# (CLAUDE.md → Сдача работы); в git идут план, журналы срезов, вердикты, промпты и спеки мутаций.
+docs/plans/**/*-gates.txt
+docs/plans/**/*.png
+docs/plans/**/*.py
+docs/plans/**/*.mjs
+.pytest_cache/
+.ruff_cache/

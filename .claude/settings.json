@@ -1,4 +1,7 @@
 {
+  "env": {
+    "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "1"
+  },
   "hooks": {
     "PreToolUse": [
       {
@@ -15,6 +18,19 @@
             "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/reminders.py\"",
             "timeout": 10,
             "statusMessage": "Проверка напоминаний…"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/orca-card-sync.py\"",
+            "timeout": 40,
+            "statusMessage": "Карточка Orca…"
           }
         ]
       }
