@@ -40,7 +40,7 @@ RULES: list[tuple[str, str, str]] = [
         "тема из ADR-гейта — решение записывается ADR до правки",
     ),
     (
-        r"на orca|эпик на orca|epic-orca|воркер",
+        r"\borca\b|epic-orca",
         "epic-orca",
         "пилот формы 2 — цикл эпика воркерами Orca",
     ),

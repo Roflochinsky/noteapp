@@ -7,7 +7,7 @@
 
 bd вызывается только на чтение. Перенесено из workwatch (спека формы 2, E4); замки — noteapp.
 
-  python3 scripts/ready-slices.py nikitatrubaev-0rk -n 3
+  python3 scripts/ready-slices.py nikitatrubaev-0rk -n 2
 """
 
 import argparse
@@ -105,7 +105,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("epic")
     ap.add_argument("-C", "--repo", default=".")
-    ap.add_argument("-n", "--max", type=int, default=3)
+    ap.add_argument("-n", "--max", type=int, default=2)
     a = ap.parse_args()
     repo = os.path.abspath(a.repo)
 
@@ -124,7 +124,7 @@ def main():
 
     cand = []
     for i in issues:
-        if i.get("status") != "open":
+        if i.get("status") not in ("open", "blocked"):
             continue
         f = touches(i, repo)
         cand.append(
@@ -142,7 +142,9 @@ def main():
     taken_files, taken_locks, chosen, waiting = set(), set(), [], []
     for cid, _pri, f, lk, isready, title in cand:
         if not isready:
-            waiting.append((cid, title, "заблокирован зависимостью (bd ready не отдаёт)"))
+            waiting.append(
+                (cid, title, "заблокирован (bd ready не отдаёт: зависимость или status=blocked)")
+            )
             continue
         if not f:
             waiting.append(

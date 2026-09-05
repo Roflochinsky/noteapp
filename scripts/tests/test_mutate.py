@@ -401,7 +401,7 @@ def test_a_filter_that_selects_nothing_is_an_invalid_run(repo: Path) -> None:
     before = _sha(repo / "app/src/main/kotlin/com/example/Calc.kt")
     done = _run(repo, "run", "--id", "na-18", "--spec", str(_spec(repo, CONTROL + absent)))
     assert done.returncode == 2, done.stdout + done.stderr
-    assert "НЕВАЛИДЕН" in done.stdout
+    assert "невалиден" in (done.stdout + done.stderr).lower()
     assert _sha(repo / "app/src/main/kotlin/com/example/Calc.kt") == before
 
 
@@ -417,7 +417,40 @@ def test_a_cached_task_is_an_invalid_run(repo: Path) -> None:
         env={"MUTATE_FAKE_CACHE": "1"},
     )
     assert done.returncode == 2, done.stdout + done.stderr
-    assert "НЕВАЛИДЕН" in done.stdout
+    assert "невалиден" in (done.stdout + done.stderr).lower()
+
+
+def test_red_baseline_refuses(repo: Path) -> None:
+    """Тест красный ещё до мутации — прогон не начинается (иначе он бы зачёлся за убийство)."""
+    tests = json.loads((repo / "tests.json").read_text(encoding="utf-8"))
+    tests.append(
+        {
+            "classname": "com.example.CalcTest",
+            "name": "already red()",
+            "file": "app/src/main/kotlin/com/example/Calc.kt",
+            "must_contain": "этой строки в файле нет",
+        }
+    )
+    (repo / "tests.json").write_text(json.dumps(tests, ensure_ascii=False), encoding="utf-8")
+    _vcs(repo, "add", "-A")
+    _vcs(repo, "commit", "-qm", "красный тест")
+    done = _run(repo, "run", "--id", "na-22", "--spec", str(_spec(repo, CONTROL + MUTATION_P1)))
+    assert done.returncode == 2, done.stdout + done.stderr
+    assert "базовый прогон" in done.stderr
+    assert "already red" in done.stderr
+    assert not (repo / ".mutations" / "na-22").exists()
+
+
+def test_strip_params_only_trailing_block() -> None:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("mutate", MUTATE)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["mutate"] = mod  # dataclass с отложенными аннотациями ищет модуль здесь
+    spec.loader.exec_module(mod)
+    assert mod._strip_params("список [a, b] сортируется") == "список [a, b] сортируется"
+    assert mod._strip_params("параметризованный[1]") == "параметризованный"
+    assert mod.matches("com.x.T::список [a, b] сортируется", "T::список [c] пуст") is False
 
 
 def test_missing_gate_refuses(repo: Path) -> None:

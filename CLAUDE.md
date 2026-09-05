@@ -21,7 +21,9 @@
 
 **Гейт зовётся через `bin/gate`, а не `./gradlew` напрямую.** Обёртка снимает `JAVA_HOME`
 (`java` в PATH нет, JDK в `~/.local/java/jdk17`) и `local.properties` (не в git, в свежем
-worktree его нет), ставит прогоны в очередь через `flock` и — главное — ходит `--offline`.
+worktree его нет — голый Gradle падает на «SDK location not found»; руками —
+`cp ~/code/noteapp/local.properties .`), ставит прогоны в очередь через `flock` и — главное —
+ходит `--offline`.
 `bin/gate <задачи>` — свои задачи Gradle; `bin/gate --online` — когда сменили версию зависимости.
 
 **Почему `--offline` (замер 2026-08-29):** конфигурация сборки шла **280 секунд**, из них 279 —

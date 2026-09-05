@@ -14,6 +14,9 @@
 Gradle не печатает имена прошедших тестов. Кэш сборки — ловушка (docs/harness/epic.md):
 задача, пришедшая `FROM-CACHE`/`UP-TO-DATE`, или отчёты старше старта прогона — прогон невалиден.
 
+До первой подмены — базовый прогон каждого фильтра без мутации: красный или невалидный базовый
+прогон — код 2 (иначе уже красный тест засчитался бы за убийство).
+
 Коды выхода: 0 — все мутации убиты и управляющая убита; 1 — есть выжившая мутация (дыра
 в стражах); 2 — отказ харнесса (прогон невалиден, судить о стражах по нему нельзя).
 
@@ -239,7 +242,8 @@ def run_gate(root: Path, tests: str) -> tuple[str, list[Case], int]:
 
 
 def _strip_params(name: str) -> str:
-    return name.split("[")[0].strip()
+    """Срезается только ХВОСТОВОЙ блок параметров `[…]`: `[` внутри Kotlin-имени — часть имени."""
+    return re.sub(r"\[[^\]]*\]$", "", name).strip()
 
 
 def matches(nodeid: str, expect_fail: str) -> bool:
@@ -279,6 +283,21 @@ def verdict(output: str, cases: list[Case], mut: Mutation) -> Outcome:
         tail="\n".join(output.strip().splitlines()[-TAIL_LINES:]),
         fell=fell,
     )
+
+
+def baseline(root: Path, tests: str) -> None:
+    """Прогон фильтра БЕЗ подмены: обязан быть валидным и зелёным, иначе судить нечем."""
+    output, cases, _rc = run_gate(root, tests)
+    probe = verdict(output, cases, Mutation("baseline", "", "", "-", "", tests, "-::-"))
+    if probe.invalid:
+        raise Refusal(
+            f"базовый прогон фильтра {tests!r} невалиден — задача из кэша, отчётов нет или сборка упала"
+        )
+    if probe.failed:
+        raise Refusal(
+            f"базовый прогон фильтра {tests!r} красный без мутации: {', '.join(probe.fell)} — "
+            "сначала починить тест, потом мерить стражей"
+        )
 
 
 # --- одна мутация ------------------------------------------------------------
@@ -360,6 +379,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         mutations = [m for m in mutations if m.id == args.only]
         if not mutations:
             raise Refusal(f"мутации с id {args.only} в спеке нет")
+
+    for tests in dict.fromkeys(m.tests for m in [*mutations, control]):
+        baseline(root, tests)
 
     journal = root / JOURNAL_DIR / args.id
     journal.mkdir(parents=True, exist_ok=True)
