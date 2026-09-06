@@ -1,0 +1,198 @@
+#!/usr/bin/env python3
+"""Страница сверки прогонов bin/stt-bench глазами и ушами: плеер + расшифровки по таймкодам.
+
+    bin/stt-compare-html ~/stt-bench-out ~/zapis.m4a [--words ~/stt-words.txt]
+
+Берёт сырые JSON вендоров из каталога прогона, режет их на реплики со временем начала и
+собирает ОДИН файл `compare.html` рядом (аудио копируется туда же). Открывается любым
+браузером с диска, сети и библиотек не нужно. Тап по таймкоду перематывает запись, идущая
+реплика подсвечивается в каждом столбце, термины словаря подсвечены, по ним есть переходы.
+Файл содержит расшифровку личного разговора — в репо не класть (каталог в .gitignore).
+"""
+
+import argparse
+import html
+import json
+import re
+import shutil
+import sys
+from pathlib import Path
+
+GAP = 1.5  # секунд тишины между словами одного спикера, после которой начинается новая реплика
+
+
+def group(words):
+    """[(start, end, speaker, text)] → реплики: тот же спикер и пауза короче GAP."""
+    out = []
+    for start, end, speaker, text in words:
+        if out and out[-1]["speaker"] == speaker and start - out[-1]["end"] < GAP:
+            out[-1]["text"] += " " + text
+            out[-1]["end"] = end
+        else:
+            out.append({"start": start, "end": end, "speaker": speaker, "text": text})
+    return out
+
+
+def utterances(raw):
+    """Реплики из сырого ответа любого из вендоров стенда; None — форма не опознана."""
+    if isinstance(raw.get("results"), dict) and raw["results"].get("utterances"):  # Deepgram
+        return [
+            {"start": u["start"], "end": u["end"], "speaker": str(u.get("speaker", "?")), "text": u["transcript"]}
+            for u in raw["results"]["utterances"]
+        ]
+    if isinstance(raw.get("utterances"), list):  # AssemblyAI (миллисекунды)
+        return [
+            {"start": u["start"] / 1000, "end": u["end"] / 1000, "speaker": str(u["speaker"]), "text": u["text"]}
+            for u in raw["utterances"]
+        ]
+    if isinstance(raw.get("results"), list):  # Speechmatics: слова с типом
+        words = []
+        for r in raw["results"]:
+            alt = (r.get("alternatives") or [{}])[0]
+            if r.get("type") == "word":
+                words.append((r["start_time"], r["end_time"], str(alt.get("speaker", "?")), alt.get("content", "")))
+            elif r.get("type") == "punctuation" and words:
+                s, e, sp, t = words[-1]
+                words[-1] = (s, e, sp, t + alt.get("content", ""))
+        return group(words)
+    if isinstance(raw.get("words"), list):  # ElevenLabs: words / spacing / audio_event
+        words = []
+        for w in raw["words"]:
+            if w.get("type") == "spacing":
+                continue
+            text = w.get("text", "")
+            if w.get("type") == "audio_event":
+                text = f"({text})"
+            words.append((w["start"], w["end"], str(w.get("speaker_id", "?")), text))
+        return group(words)
+    return None
+
+
+def load_terms(path):
+    if not path or not path.exists():
+        return []
+    return [ln.strip() for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")]
+
+
+def build(out_dir, audio, terms):
+    variants = []
+    for f in sorted(out_dir.glob("[0-9][0-9]-*.json")):
+        try:
+            raw = json.loads(f.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        rows = utterances(raw) if isinstance(raw, dict) else None
+        if not rows:
+            continue
+        title = f.stem.replace("-bez", " · без словаря").replace("-slovar", " · со словарём")
+        variants.append({"id": f.stem, "title": title, "rows": rows})
+    if not variants:
+        sys.exit(f"в {out_dir} нет ни одного разобранного JSON")
+    target = out_dir / audio.name
+    if audio.resolve() != target.resolve():
+        shutil.copy2(audio, target)
+    page = TEMPLATE.replace("__AUDIO__", html.escape(audio.name))
+    page = page.replace("__DATA__", json.dumps(variants, ensure_ascii=False))
+    page = page.replace("__TERMS__", json.dumps(terms, ensure_ascii=False))
+    (out_dir / "compare.html").write_text(page, encoding="utf-8")
+    return len(variants), sum(len(v["rows"]) for v in variants)
+
+
+TEMPLATE = r"""<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Сверка STT</title>
+<style>
+:root{--ink:#1F2A44;--mut:#6A7386;--line:#E3E3DC;--paper:#FBFBF9;--hit:#FFF1B8;--now:#DDE8F7;--blue:#3A6FB8}
+body{margin:0;font:14px/1.45 system-ui,sans-serif;color:var(--ink);background:var(--paper)}
+header{position:sticky;top:0;background:#fff;border-bottom:1px solid var(--line);padding:8px 12px;z-index:2;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+audio{flex:1;min-width:280px}
+header label{white-space:nowrap;color:var(--mut)}
+#terms button{margin:2px;border:1px solid var(--line);background:#fff;border-radius:12px;padding:2px 8px;cursor:pointer}
+#terms button.on{background:var(--hit)}
+main{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(320px,1fr);gap:8px;padding:8px;overflow-x:auto;height:calc(100vh - 70px);box-sizing:border-box}
+section{border:1px solid var(--line);background:#fff;display:flex;flex-direction:column;min-height:0}
+section h2{font-size:13px;margin:0;padding:6px 8px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#fff}
+section h2 small{color:var(--mut);font-weight:normal}
+.rows{overflow-y:auto;padding:4px 0}
+.r{padding:3px 8px;display:grid;grid-template-columns:44px 28px 1fr;gap:6px;border-left:3px solid transparent}
+.r.now{background:var(--now);border-left-color:var(--blue)}
+.r.hit{background:var(--hit)}
+.r.now.hit{background:#EEE3B0}
+.t{color:var(--blue);cursor:pointer;font-variant-numeric:tabular-nums}
+.s{color:var(--mut)}
+mark{background:#FFD75E;padding:0 1px}
+#jumps{color:var(--mut)}
+#jumps a{margin-right:6px;color:var(--blue);cursor:pointer}
+</style></head><body>
+<header>
+<audio id="a" controls preload="metadata" src="__AUDIO__"></audio>
+<label><input type="checkbox" id="follow" checked> следовать за записью</label>
+<span id="terms"></span>
+<span id="jumps"></span>
+</header>
+<main id="m"></main>
+<script>
+const DATA=__DATA__, TERMS=__TERMS__;
+const a=document.getElementById('a'), m=document.getElementById('m');
+const mmss=s=>{s=Math.floor(s);return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')};
+const esc=t=>t.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+let active=new Set();
+function render(){
+  m.innerHTML='';
+  for(const v of DATA){
+    const sec=document.createElement('section');
+    sec.innerHTML=`<h2>${esc(v.title)} <small>${v.rows.length} реплик</small></h2><div class="rows"></div>`;
+    const box=sec.querySelector('.rows');
+    for(const r of v.rows){
+      const d=document.createElement('div');d.className='r';d.dataset.s=r.start;d.dataset.e=r.end;
+      let text=esc(r.text), hit=false;
+      for(const t of active){const rx=new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'giu');if(rx.test(text)){hit=true;text=text.replace(rx,x=>`<mark>${x}</mark>`)}}
+      if(hit)d.classList.add('hit');
+      d.innerHTML=`<span class="t">${mmss(r.start)}</span><span class="s">${esc(r.speaker)}</span><span>${text}</span>`;
+      d.querySelector('.t').onclick=()=>{a.currentTime=r.start;a.play()};
+      box.appendChild(d);
+    }
+    m.appendChild(sec);
+  }
+  jumps();
+}
+function jumps(){
+  const j=document.getElementById('jumps'); j.innerHTML='';
+  if(!active.size)return;
+  const times=new Set();
+  for(const v of DATA)for(const r of v.rows)for(const t of active)if(r.text.toLowerCase().includes(t.toLowerCase()))times.add(Math.floor(r.start/5)*5);
+  const sorted=[...times].sort((x,y)=>x-y);
+  j.append('переходы: ');
+  for(const t of sorted){const e=document.createElement('a');e.textContent=mmss(t);e.onclick=()=>{a.currentTime=t;a.play()};j.appendChild(e)}
+}
+const tb=document.getElementById('terms');
+for(const t of TERMS){const b=document.createElement('button');b.textContent=t;b.onclick=()=>{active.has(t)?active.delete(t):active.add(t);b.classList.toggle('on');render()};tb.appendChild(b)}
+render();
+a.ontimeupdate=()=>{
+  const now=a.currentTime, follow=document.getElementById('follow').checked;
+  for(const sec of m.children){
+    let cur=null;
+    for(const d of sec.querySelectorAll('.r')){const on=now>=+d.dataset.s&&now<+d.dataset.e+0.3;d.classList.toggle('now',on);if(on)cur=d}
+    if(cur&&follow){const box=sec.querySelector('.rows');const top=cur.offsetTop-box.offsetTop-box.clientHeight/2;box.scrollTo({top,behavior:'smooth'})}
+  }
+};
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT')return;
+  if(e.code==='Space'){e.preventDefault();a.paused?a.play():a.pause()}
+  if(e.code==='ArrowLeft')a.currentTime-=5; if(e.code==='ArrowRight')a.currentTime+=5;
+});
+</script></body></html>
+"""
+
+
+def main():
+    ap = argparse.ArgumentParser(description="страница сверки прогонов STT")
+    ap.add_argument("out_dir", type=Path, help="каталог прогона bin/stt-bench")
+    ap.add_argument("audio", type=Path, help="запись, которую гоняли")
+    ap.add_argument("--words", type=Path, help="словарь имён — кнопки подсветки")
+    a = ap.parse_args()
+    n, rows = build(a.out_dir, a.audio, load_terms(a.words))
+    print(f"{a.out_dir / 'compare.html'}: {n} вариантов, {rows} реплик; аудио рядом: {a.audio.name}")
+
+
+if __name__ == "__main__":
+    main()
