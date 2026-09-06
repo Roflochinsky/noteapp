@@ -79,7 +79,10 @@ def multipart(fields, files):
     b = "----stt-bench-" + uuid.uuid4().hex
     out = bytearray()
     for k, v in fields.items():
-        out += f'--{b}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode()
+        # список — повторяющееся поле (так ElevenLabs принимает keyterms[]; JSON-строка одним
+        # полем читается как ОДИН термин длиннее 50 символов — замер 2026-09-06, HTTP 400)
+        for item in (v if isinstance(v, list) else [v]):
+            out += f'--{b}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{item}\r\n'.encode()
     for k, (name, ctype, blob) in files.items():
         out += (
             f'--{b}\r\nContent-Disposition: form-data; name="{k}"; filename="{name}"\r\n'
@@ -262,7 +265,7 @@ def elevenlabs(audio, terms):
         "timestamps_granularity": "word",
     }
     if terms:
-        fields["keyterms"] = json.dumps(terms[:1000], ensure_ascii=False)
+        fields["keyterms"] = [t for t in terms if len(t) < 50][:1000]
     body, ct = multipart(fields, {"file": (audio.name, mime(audio), AUDIO)})
     raw = call(
         "POST",
@@ -366,7 +369,9 @@ def has_word_times(obj):
     """Есть ли в ответе пословные таймкоды (нужно тикету 7cy.3)."""
     if isinstance(obj, dict):
         started = "start" in obj or "start_time" in obj
-        worded = "word" in obj or "text" in obj or "content" in obj
+        # Speechmatics: {"type": "word", "start_time": …, "alternatives": [{"content": …}]} —
+        # слово помечено типом, текст лежит уровнем ниже (замер 2026-09-06: 10 584 слова).
+        worded = "word" in obj or "text" in obj or "content" in obj or obj.get("type") == "word"
         return (started and worded) or any(has_word_times(v) for v in obj.values())
     if isinstance(obj, list):
         return any(has_word_times(v) for v in obj)
