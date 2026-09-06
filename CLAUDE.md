@@ -1,6 +1,6 @@
 # noteapp — правила для агентов
 
-Личный Android-диктофон (OnePlus 13): long-press питания → запись → Deepgram → `.md` →
+Личный Android-диктофон (OnePlus 13): long-press питания → запись → STT (ElevenLabs Scribe v2 по ADR 2026-09-06; в коде пока Deepgram) → `.md` →
 приватный GitHub-репо → Claude-Action пишет саммари. Продуктовая правда — `PRODUCT.md`,
 глоссарий — `CONTEXT.md`, решения — wayfinder-карты (`bd show nikitatrubaev-7cy`, активная v3)
 и `docs/adr/`. Потолок этого файла — 250 строк: дело в бюджете инструкций, описательное —
@@ -91,7 +91,7 @@ ruff + pytest (скрипты харнеса). Версии пинить в Grad
 
 - формат заметки `.md` (frontmatter, имена файлов, раскладка папок репо заметок);
 - контракт GitHub Action (промпт, триггер, что и куда пишет);
-- выбор STT и его ключевые параметры (сейчас: Deepgram nova-3, диаризация);
+- выбор STT и его ключевые параметры (сейчас: ElevenLabs Scribe v2, `docs/adr/2026-09-06-stt-elevenlabs-scribe-v2.md`);
 - механизм триггера записи (ассистент-роль / ACTION_ASSIST);
 - всё, что касается хранения аудио и приватности.
 
@@ -102,7 +102,7 @@ ruff + pytest (скрипты харнеса). Версии пинить в Grad
 
 - **Телефон владельца — не стенд.** Установка APK, смена роли ассистента, системные
   настройки — только по явному указанию владельца.
-- Реальный GitHub-репо заметок и ключи (Deepgram, GitHub token, CLAUDE_CODE_OAUTH_TOKEN) —
+- Реальный GitHub-репо заметок и ключи (ElevenLabs, Deepgram, GitHub token, CLAUDE_CODE_OAUTH_TOKEN) —
   только по явному указанию; для тестов — отдельный тестовый репо `Roflochinsky/voice-notes-test`.
 - Деструктивные операции блокирует хук `destructive-fs-guard`; обход `WW_DESTRUCTIVE_OK=1` —
   только после явного одобрения владельцем точной команды. `orca worktree rm` идёт мимо
@@ -129,7 +129,7 @@ ruff + pytest (скрипты харнеса). Версии пинить в Grad
 | Ревью кода | `mattpocock-skills:code-review` (оси инлайном, `na-reviewer`) |
 | Баг, не работает, медленно | `mattpocock-skills:diagnosing-bugs` |
 | Любая правка UI | `impeccable:impeccable` — `DESIGN.md` + компы в `docs/design/` (v2 `2026-08-26-comp-v2.html`, v3 `2026-08-30-comp-v3.html`) — жёсткое ограничение |
-| Внешние факты (Deepgram, GitHub API, Android) | `mattpocock-skills:research` через `na-researcher` |
+| Внешние факты (ElevenLabs, GitHub API, Android) | `mattpocock-skills:research` через `na-researcher` |
 | Доки при коммите | `update-docs` |
 | Тебя поправили или ошибка повторилась | `codifying-learnings` |
 | Непонятно объяснил | `/wait-what` (зовёт владелец) |
