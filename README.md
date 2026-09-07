@@ -12,7 +12,7 @@ GitHub-репо, где Claude дописывает саммари и раскл
 ```mermaid
 flowchart LR
     A["Кнопка питания<br/>(long-press, ассистент-роль)"] --> B["Запись аудио<br/>(фоновый сервис)"]
-    B --> C["Deepgram nova-3<br/>транскрипт + спикеры"]
+    B --> C["ElevenLabs Scribe v2<br/>транскрипт + спикеры"]
     C --> D["raw-заметка .md<br/>frontmatter + транскрипт"]
     D --> E["Пуш в inbox/<br/>репо заметок"]
     E --> F["GitHub Action + Claude<br/>саммари, тип, участники"]
@@ -29,13 +29,13 @@ flowchart LR
 ## Установка и настройка
 
 Мануал с нуля — **[docs/SETUP.md](docs/SETUP.md)**: APK из
-[Releases](../../releases), онбординг-чеклист, токены GitHub/Deepgram, workflow
+[Releases](../../releases), онбординг-чеклист, токены GitHub/ElevenLabs, workflow
 Claude-Action в репо заметок.
 
 ## Стек
 
 Kotlin + Jetpack Compose (minSdk 34, targetSdk 35) · WorkManager (очередь пайплайна) ·
-Deepgram nova-3 с диаризацией (STT) · `anthropics/claude-code-action` (саммари).
+ElevenLabs Scribe v2 с диаризацией (STT) · `anthropics/claude-code-action` (саммари).
 
 ## Структура репо
 

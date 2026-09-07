@@ -89,7 +89,7 @@ class MainActivity : ComponentActivity() {
     private var refreshing by mutableStateOf(false)
     private var recording by mutableStateOf(false)
     private var sheetOpen by mutableStateOf(false)
-    private var dialog by mutableStateOf<String?>(null) // "deepgram" | "github"
+    private var dialog by mutableStateOf<String?>(null) // "elevenlabs" | "github"
     private var input by mutableStateOf("")
     private var permTick by mutableIntStateOf(0)
     private var repoStore: RepoStore? = null
@@ -267,8 +267,8 @@ class MainActivity : ComponentActivity() {
             )
         }
         when (dialog) {
-            "deepgram" ->
-                InputDialog("Ключ Deepgram") { Settings.setDeepgramKey(this@MainActivity, it) }
+            "elevenlabs" ->
+                InputDialog("Ключ ElevenLabs") { Settings.setElevenLabsKey(this@MainActivity, it) }
             "github" ->
                 InputDialog("GitHub-токен (репо заметок)") {
                     Settings.setGithubToken(this@MainActivity, it)
@@ -481,13 +481,15 @@ class MainActivity : ComponentActivity() {
                 input = Settings.githubToken(this).orEmpty()
                 dialog = "github"
             },
+            // Ключ Deepgram из настроек ушёл вместе с вендором (ADR
+            // `2026-09-06-stt-elevenlabs-scribe-v2`), но из хранилища НЕ стёрт: он путь отката.
             OnboardStep(
-                "Ключ Deepgram",
+                "Ключ ElevenLabs",
                 "расшифровка и спикеры",
-                Settings.deepgramKey(this) != null,
+                Settings.elevenLabsKey(this) != null,
             ) {
-                input = Settings.deepgramKey(this).orEmpty()
-                dialog = "deepgram"
+                input = Settings.elevenLabsKey(this).orEmpty()
+                dialog = "elevenlabs"
             },
             OnboardStep(
                 "Батарея без ограничений",
@@ -506,9 +508,11 @@ class MainActivity : ComponentActivity() {
         val mic =
             checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
                 PackageManager.PERMISSION_GRANTED
+        // Ключ распознавания — ElevenLabs: по старому ключу Deepgram онбординг был бы зелёным, и
+        // владелец шага «Ключ ElevenLabs» не увидел бы вовсе.
         return role &&
             mic &&
-            Settings.deepgramKey(this) != null &&
+            Settings.elevenLabsKey(this) != null &&
             Settings.githubToken(this) != null
     }
 
