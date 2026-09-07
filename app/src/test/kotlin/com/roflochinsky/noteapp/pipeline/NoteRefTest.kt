@@ -26,11 +26,19 @@ class NoteRefTest {
 
     private fun note(path: String, md: String) = checkNotNull(NoteFile.parse(path, md))
 
-    private fun record(id: String, pushed: Boolean = true, status: String = "") =
+    // `transcribed` и `status` — параметры независимые, как в прод-коде: флаг расшифровки там
+    // читается из наличия `transcript.md`, причина — из `status.txt`. Выведи одно из другого — и
+    // случай «расшифрована, а причина от фатального 401 всё ещё лежит» станет непостроимым.
+    private fun record(
+        id: String,
+        pushed: Boolean = true,
+        status: String = "",
+        transcribed: Boolean = true,
+    ) =
         NotesStore.Note(
             id = id,
             hasAudio = true,
-            transcribed = status.isEmpty(),
+            transcribed = transcribed,
             pushed = pushed,
             durationSec = 751,
             title = "Смотри, по релизу",
@@ -52,6 +60,7 @@ class NoteRefTest {
                 "20260824-180732",
                 pushed = false,
                 status = "ошибка ElevenLabs 401\n{\"detail\":\"invalid_api_key\"}",
+                transcribed = false,
             )
         val rows =
             NoteRef.merge(listOf(waiting), listOf(note("встречи/2026-08-12-1922-x.md", vone)))

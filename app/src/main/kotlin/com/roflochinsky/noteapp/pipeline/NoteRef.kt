@@ -173,7 +173,7 @@ data class FeedItem(val ref: String, val local: NotesStore.Note?, val note: Note
      * Причину знает только телефон: заметка, доехавшая до репо, уже расшифрована по построению.
      */
     val statusLine: String
-        get() = local?.status?.lineSequence()?.firstOrNull().orEmpty()
+        get() = local?.status.orEmpty().lines().first()
 
     /**
      * Та же причина плюс начало ответа вендора: в плашке деталки для него есть место, в ленте нет.

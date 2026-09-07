@@ -29,6 +29,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
+import androidx.work.WorkManager
 import com.roflochinsky.noteapp.pipeline.GithubClient
 import com.roflochinsky.noteapp.pipeline.NoteFile
 import com.roflochinsky.noteapp.pipeline.NoteRef
@@ -50,6 +51,7 @@ import com.roflochinsky.noteapp.ui.Tab
 import com.roflochinsky.noteapp.ui.TaskDetailScreen
 import com.roflochinsky.noteapp.ui.TaskFilter
 import com.roflochinsky.noteapp.ui.TasksScreen
+import java.io.File
 import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -517,21 +519,44 @@ class MainActivity : ComponentActivity() {
 
         /**
          * Ключ приехал — записи, ждавшие его в очереди, уходят сами: владелец не должен тапать по
-         * каждой заметке, накопившейся без ключа. Нового механизма очереди здесь нет и не нужно —
-         * `ExistingWorkPolicy.KEEP` ([PipelineQueue]) сам пропустит те, что ещё стоят в очереди, а
-         * повторы и ожидание сети WorkManager несёт сам.
+         * каждой заметке, накопившейся без ключа.
+         *
+         * Каждой такой записи достаётся три действия, и ни одно не лишнее:
+         * 1. **причина стирается** — она протухла по построению: строка «нет ключа ElevenLabs»
+         *    относится к ключу, которого больше нет, а пишет и снимает файл только сам
+         *    [TranscribeWorker], до следующей попытки он до неё не доберётся;
+         * 2. **цепочка `note-<id>` отменяется** — запись без ключа стоит в WorkManager
+         *    незавершённой (воркер вернул `retry`), а `ExistingWorkPolicy.KEEP` ([PipelineQueue])
+         *    при незавершённой работе новый запрос выбрасывает. Без отмены постановка ниже не
+         *    делает ничего, и момент расшифровки остаётся за откатом, назначенным ещё ДО ввода
+         *    ключа: `BackoffPolicy.EXPONENTIAL` от 30 с упирается в потолок WorkManager в 5 часов;
+         * 3. **запись ставится заново** — уже поверх завершённой цепочки, поэтому `KEEP` её
+         *    пропускает. Саму политику не трогаем: она на своём месте бережёт от повторной заливки
+         *    48 МБ, когда запись и правда ещё в работе.
          *
          * Расшифрованные записи не трогаем: их цепочка кончается пушем, и лишний прогон стоил бы
          * лишнего похода в GitHub на каждую старую заметку.
          *
          * Вынесено из диалога ровно затем, чтобы эти строки исполнял тест (образец —
-         * `TranscribeWorker.transcribeById`): собрать `Activity` в юните дорого. Значение [enqueue]
-         * по умолчанию остаётся объявленным долгом — проводку «диалог → очередь» ловит прокликка.
+         * `TranscribeWorker.transcribeById`): собрать `Activity` в юните дорого. Значения [enqueue]
+         * и [cancel] по умолчанию остаются объявленным долгом — проводку «диалог → очередь» ловит
+         * прокликка.
          */
         internal fun enqueueWaiting(
             context: Context,
             enqueue: (String) -> Unit = { PipelineQueue.enqueue(context, it) },
-        ) = NotesStore.list(context).filterNot { it.transcribed }.map { it.id }.forEach(enqueue)
+            cancel: (String) -> Unit = {
+                WorkManager.getInstance(context).cancelUniqueWork(PipelineQueue.NOTE_PREFIX + it)
+            },
+        ) =
+            NotesStore.list(context)
+                .filterNot { it.transcribed }
+                .map { it.id }
+                .forEach { id ->
+                    File(NotesStore.noteDir(context, id), NotesStore.STATUS).delete()
+                    cancel(id)
+                    enqueue(id)
+                }
 
         /**
          * Онбординг пройден. Ключ распознавания — ElevenLabs: ключ Deepgram спека велит не стирать

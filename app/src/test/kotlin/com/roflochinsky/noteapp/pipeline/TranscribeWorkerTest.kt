@@ -291,6 +291,46 @@ class TranscribeWorkerTest {
         assertEquals(text, file.readText())
     }
 
+    /**
+     * Тот же обрыв, но с той стороны, с которой он случается в бою: `transcript.md` пишет воркер, а
+     * не тест. Соседний тест выше держит сам хелпер [NotesStore.writeAtomic]; этот держит то, что
+     * воркер его ЗОВЁТ.
+     *
+     * Дыра без него тихая и полная: замени в `recognize` `NotesStore.writeAtomic(...)` на прямой
+     * `writeText` — содержимое файла в спокойном прогоне не изменится ни на байт, поэтому все
+     * прочие тесты класса (они сверяют содержимое) останутся зелёными, а дефект вернётся целиком.
+     *
+     * Форма — по замеру харнеса (`docs/harness/epic.md`, «Мутационная проверка»): гонка ловится
+     * числом попыток, а не размером данных, поэтому здесь короткая расшифровка и много кругов.
+     * Прямая запись открывает файл с усечением, и окно нулевой длины есть на каждом круге; при
+     * `.tmp` + `renameTo` читатель видит либо отсутствие файла, либо его целиком.
+     */
+    @Test
+    fun `воркер кладёт transcript md целиком или никак`() {
+        val dir = noteDir()
+        val file = File(dir, NotesStore.TRANSCRIPT_MD)
+        run(dir) { _, _ -> ONE_WORD }
+        val whole = file.readText()
+        val torn = java.util.concurrent.atomic.AtomicReference<String>()
+        val done = java.util.concurrent.atomic.AtomicBoolean(false)
+        val reader = Thread {
+            while (!done.get() && torn.get() == null) {
+                runCatching { file.readText() }.getOrNull()?.takeIf { it != whole }?.let(torn::set)
+            }
+        }
+
+        reader.start()
+        repeat(WORKER_WRITES) {
+            file.delete()
+            run(dir) { _, _ -> ONE_WORD }
+        }
+        done.set(true)
+        reader.join()
+
+        assertEquals("читатель увидел кусок файла: ${torn.get()}", null, torn.get())
+        assertEquals(whole, file.readText())
+    }
+
     private companion object {
         const val OLD_MD = "[00:00] Спикер 1: старая заметка"
         const val NO_KEY = "нет ключа ElevenLabs"
@@ -298,5 +338,12 @@ class TranscribeWorkerTest {
         /** Столько слов даёт около 240 КБ — прямая запись такого файла идёт десятками syscall. */
         const val WORDS = 40_000
         const val WRITES = 200
+
+        /** Одно слово одного спикера: короткая расшифровка, чтобы круг стоил дёшево. */
+        const val ONE_WORD =
+            """{"words":[{"type":"word","text":"слово","start":0.0,"end":0.5,""" +
+                """"speaker_id":"speaker_0"}]}"""
+
+        const val WORKER_WRITES = 3_000
     }
 }

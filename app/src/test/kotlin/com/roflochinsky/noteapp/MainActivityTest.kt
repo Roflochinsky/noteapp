@@ -28,10 +28,16 @@ class MainActivityTest {
 
     private val context = RuntimeEnvironment.getApplication()
 
-    private fun record(id: String, transcribed: Boolean) {
+    /**
+     * Флаг расшифровки и причина — параметры независимые, как в прод-коде: `transcribed` там
+     * читается из наличия `transcript.md`, а причина из `status.txt`, и «расшифрована» вовсе не
+     * значит «причины нет» (причина от фатального 401 остаётся лежать).
+     */
+    private fun record(id: String, transcribed: Boolean, status: String = "") {
         val dir = NotesStore.noteDir(context, id)
         File(dir, NotesStore.AUDIO).writeText("postanovochnye-bajty-zvuka")
         if (transcribed) File(dir, NotesStore.TRANSCRIPT_MD).writeText("[00:00] Спикер 1: текст")
+        if (status.isNotEmpty()) File(dir, NotesStore.STATUS).writeText(status)
     }
 
     /**
@@ -49,10 +55,42 @@ class MainActivityTest {
         record("20260907-103000", transcribed = false)
         val queued = mutableListOf<String>()
 
-        MainActivity.enqueueWaiting(context, queued::add)
+        MainActivity.enqueueWaiting(context, enqueue = queued::add, cancel = {})
 
         assertEquals(setOf("20260907-101500", "20260907-103000"), queued.toSet())
         assertEquals(queued.toString(), 2, queued.size)
+    }
+
+    /**
+     * Критерий приёмки 5, вторая половина по-настоящему: «после ввода ключа запись уходит **сама**»
+     * — а не через пять часов.
+     *
+     * Двух строк тут мало не бывает. Причина («нет ключа ElevenLabs») по построению протухла:
+     * владелец только что сменил ключ, — и если её не снять, лента будет ругаться на ключ, который
+     * уже введён. Висящая цепочка `note-<id>` не завершена (воркер вернул `retry`), а
+     * `ExistingWorkPolicy.KEEP` ([PipelineQueue]) новый запрос при незавершённой работе выбрасывает
+     * — значит без отмены постановка не делает ровно ничего, и момент расшифровки остаётся за
+     * откатом, назначенным ещё ДО ввода ключа (потолок WorkManager — 5 часов).
+     *
+     * Порядок в списке — часть требования: отмени цепочку после постановки, и выброшено будет как
+     * раз то, что поставили.
+     */
+    @Test
+    fun `после ввода ключа протухшая причина снята, а висящая цепочка отменена до постановки`() {
+        record("20260907-101500", transcribed = false, status = "нет ключа ElevenLabs")
+        val log = mutableListOf<String>()
+
+        MainActivity.enqueueWaiting(
+            context,
+            enqueue = { log += "в очередь $it" },
+            cancel = { log += "отменить $it" },
+        )
+
+        assertFalse(
+            "причина пережила ввод ключа — лента будет ругаться на введённый ключ",
+            File(NotesStore.noteDir(context, "20260907-101500"), NotesStore.STATUS).exists(),
+        )
+        assertEquals(listOf("отменить 20260907-101500", "в очередь 20260907-101500"), log)
     }
 
     /**
