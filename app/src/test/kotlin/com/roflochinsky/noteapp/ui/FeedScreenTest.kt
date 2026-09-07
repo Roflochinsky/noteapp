@@ -78,6 +78,7 @@ class FeedScreenTest {
         pushed: Boolean = true,
         transcribed: Boolean = true,
         title: String = "Смотри, по релизу",
+        status: String = "",
     ) =
         NotesStore.Note(
             id = id,
@@ -87,6 +88,7 @@ class FeedScreenTest {
             durationSec = 751,
             title = title,
             preview = "$title: я бы закрыл экспорт тем",
+            status = status,
         )
 
     private fun screen(feed: List<FeedItem>, people: List<String> = emptyList()) {
@@ -138,6 +140,40 @@ class FeedScreenTest {
             )
         )
         compose.onNodeWithText("в очереди — расшифровка").assertExists()
+    }
+
+    /**
+     * Критерии приёмки 5 и 6. Известную причину лента называет словами вместо общего «в очереди»:
+     * без неё «нет сети», «нет ключа» и «ключ с опечаткой» выглядят для владельца одинаково, и
+     * заметка тихо не появляется. Начало тела ответа сюда не едет — на него места нет, оно живёт в
+     * плашке деталки.
+     */
+    @Test
+    fun `известная причина называется словами вместо общей очереди`() {
+        screen(
+            NoteRef.merge(
+                listOf(
+                    record(
+                        "20260826-120000",
+                        pushed = false,
+                        transcribed = false,
+                        title = "Без ключа",
+                        status = "нет ключа ElevenLabs",
+                    ),
+                    record(
+                        "20260826-121000",
+                        pushed = false,
+                        transcribed = false,
+                        title = "С опечаткой в ключе",
+                        status = "ошибка ElevenLabs 401\n{\"detail\":\"invalid_api_key\"}",
+                    ),
+                ),
+                emptyList(),
+            )
+        )
+        compose.onNodeWithText("нет ключа ElevenLabs").assertExists()
+        compose.onNodeWithText("ошибка ElevenLabs 401").assertExists()
+        compose.onNodeWithText("в очереди — расшифровка").assertDoesNotExist()
     }
 
     /**

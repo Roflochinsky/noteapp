@@ -217,9 +217,11 @@ private fun NoteItem(note: FeedItem, onClick: () -> Unit) {
                 modifier = Modifier.padding(top = 4.dp),
             )
         } else {
-            // Очередь — янтарь, как и вся очередь этого мира (вердикт UX; было синим).
+            // Очередь — янтарь, как и вся очередь этого мира (вердикт UX; было синим). Причину,
+            // если она известна, лента называет словами: «нет сети», «нет ключа» и «ключ с
+            // опечаткой» иначе выглядят для владельца одинаково.
             Text(
-                "в очереди — расшифровка",
+                note.statusLine.ifEmpty { "в очереди — расшифровка" },
                 style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.Amber),
                 modifier = Modifier.padding(top = 4.dp),
             )

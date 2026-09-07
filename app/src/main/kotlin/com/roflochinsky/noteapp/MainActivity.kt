@@ -2,6 +2,7 @@ package com.roflochinsky.noteapp
 
 import android.Manifest
 import android.app.role.RoleManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -268,7 +269,10 @@ class MainActivity : ComponentActivity() {
         }
         when (dialog) {
             "elevenlabs" ->
-                InputDialog("Ключ ElevenLabs") { Settings.setElevenLabsKey(this@MainActivity, it) }
+                InputDialog("Ключ ElevenLabs") {
+                    Settings.setElevenLabsKey(this@MainActivity, it)
+                    enqueueWaiting(this@MainActivity)
+                }
             "github" ->
                 InputDialog("GitHub-токен (репо заметок)") {
                     Settings.setGithubToken(this@MainActivity, it)
@@ -501,27 +505,52 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    private fun setupComplete(): Boolean {
-        val role =
-            getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT)
-                ?: false
-        val mic =
-            checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
-                PackageManager.PERMISSION_GRANTED
-        // Ключ распознавания — ElevenLabs: по старому ключу Deepgram онбординг был бы зелёным, и
-        // владелец шага «Ключ ElevenLabs» не увидел бы вовсе.
-        return role &&
-            mic &&
-            Settings.elevenLabsKey(this) != null &&
-            Settings.githubToken(this) != null
-    }
+    private fun setupComplete(): Boolean = setupComplete(this)
 
     override fun onResume() {
         super.onResume()
         permTick++
     }
 
-    private companion object {
-        const val POLL_MS = 1000L
+    companion object {
+        private const val POLL_MS = 1000L
+
+        /**
+         * Ключ приехал — записи, ждавшие его в очереди, уходят сами: владелец не должен тапать по
+         * каждой заметке, накопившейся без ключа. Нового механизма очереди здесь нет и не нужно —
+         * `ExistingWorkPolicy.KEEP` ([PipelineQueue]) сам пропустит те, что ещё стоят в очереди, а
+         * повторы и ожидание сети WorkManager несёт сам.
+         *
+         * Расшифрованные записи не трогаем: их цепочка кончается пушем, и лишний прогон стоил бы
+         * лишнего похода в GitHub на каждую старую заметку.
+         *
+         * Вынесено из диалога ровно затем, чтобы эти строки исполнял тест (образец —
+         * `TranscribeWorker.transcribeById`): собрать `Activity` в юните дорого. Значение [enqueue]
+         * по умолчанию остаётся объявленным долгом — проводку «диалог → очередь» ловит прокликка.
+         */
+        internal fun enqueueWaiting(
+            context: Context,
+            enqueue: (String) -> Unit = { PipelineQueue.enqueue(context, it) },
+        ) = NotesStore.list(context).filterNot { it.transcribed }.map { it.id }.forEach(enqueue)
+
+        /**
+         * Онбординг пройден. Ключ распознавания — ElevenLabs: ключ Deepgram спека велит не стирать
+         * (путь отката ADR), поэтому он лежит в хранилище у каждого владельца, и сверься онбординг
+         * с ним — шага «Ключ ElevenLabs» владелец не увидел бы вовсе, а каждая запись ушла бы в
+         * вечный `retry` при зелёном экране.
+         */
+        internal fun setupComplete(context: Context): Boolean {
+            val role =
+                context
+                    .getSystemService(RoleManager::class.java)
+                    ?.isRoleHeld(RoleManager.ROLE_ASSISTANT) ?: false
+            val mic =
+                context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
+                    PackageManager.PERMISSION_GRANTED
+            return role &&
+                mic &&
+                Settings.elevenLabsKey(context) != null &&
+                Settings.githubToken(context) != null
+        }
     }
 }

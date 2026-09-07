@@ -554,6 +554,11 @@ private fun AudioTab(audio: File?, marks: List<Long>) {
  * Три состояния (решение владельца 2026-08-26 (б)): доставлено — путь и напоминание, что транскрипт
  * не редактируется; правка в очереди — янтарь; запись ещё не уехала — янтарное «не отправлено ·
  * Повторить», куда переехала кнопка «Повторить отправку» (а «Поделиться» из деталки ушло).
+ *
+ * Известную причину («нет ключа ElevenLabs», «ошибка ElevenLabs 401») она называет вместо общего
+ * «не отправлено» и добавляет начало ответа вендора: в ленте места на него нет, а без него 401 от
+ * ключа с опечаткой не отличить от 401 отозванного ключа. «Повторить» остаётся: тап ставит запись в
+ * очередь заново.
  */
 @Composable
 private fun StatusLine(item: FeedItem, pending: Boolean, onRetry: () -> Unit) {
@@ -572,8 +577,10 @@ private fun StatusLine(item: FeedItem, pending: Boolean, onRetry: () -> Unit) {
         when {
             path == null ->
                 Text(
-                    "не отправлено · Повторить",
+                    item.statusDetail.ifEmpty { "не отправлено" } + " · Повторить",
                     style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.Amber),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
             pending ->
                 Text(
