@@ -165,9 +165,10 @@ class TranscribeWorker(context: Context, params: WorkerParameters) :
          * попытки дело не доходит, а причины у такой заметки и не бывает — `transcript.md` пишет
          * только `recognize`, и он снимает причину до того. Протухшую причину снимает ещё одно
          * место, вне воркера: `MainActivity.enqueueWaiting` в момент ввода ключа — там она устарела
-         * по построению, а воркер до неё доберётся только на следующей попытке.
+         * по построению, а воркер до неё доберётся только на следующей попытке. Само стирание
+         * поэтому живёт в [NotesStore.clearStatus] — каталогом записи заведует хранилище.
          */
-        private fun clearReason(dir: File) = File(dir, NotesStore.STATUS).delete()
+        private fun clearReason(dir: File) = NotesStore.clearStatus(dir)
 
         /** Начало тела ответа одной строкой: вторая строка причины — для плашки деталки. */
         private fun preview(body: String) = body.take(ERR_PREVIEW).replace(WHITESPACE, " ").trim()

@@ -19,9 +19,17 @@ import org.robolectric.Shadows.shadowOf
  * очередь после ввода ключа и когда онбординг считается пройденным.
  *
  * Сама `Activity` здесь не поднимается — оба решения вынесены в `companion` ровно затем, чтобы эти
- * строки исполнял тест (образец — `TranscribeWorker.transcribeById`). Что осталось непокрытым:
- * проводка «диалог сохранил ключ → [MainActivity.enqueueWaiting]» и «`onCreate` спросил
- * [MainActivity.setupComplete]» — объявленный долг среза, ловится прокликкой владельца.
+ * строки исполнял тест (образец — `TranscribeWorker.transcribeById`). Непокрытыми остались ЧЕТЫРЕ
+ * связывающие строки самой `Activity`, и список полный:
+ * - диалог сохранил ключ → [MainActivity.enqueueWaiting];
+ * - `onCreate` спросил [MainActivity.setupComplete];
+ * - выход из онбординга по тому же [MainActivity.setupComplete];
+ * - «Повторить» в деталке → `PipelineQueue.enqueue`.
+ *
+ * Плюс боевые значения [MainActivity.enqueueWaiting] по умолчанию: тест всегда подставляет фейки,
+ * поэтому ни `cancelUniqueWork(NOTE_PREFIX + id)`, ни `PipelineQueue.enqueue` не исполняются ни
+ * разу. Всё это — объявленный долг среза (поднять `Activity` в юните нечем:
+ * `androidx.work:work-testing` в зависимостях нет), ловится прокликкой владельца.
  */
 @RunWith(RobolectricTestRunner::class)
 class MainActivityTest {
@@ -29,9 +37,10 @@ class MainActivityTest {
     private val context = RuntimeEnvironment.getApplication()
 
     /**
-     * Флаг расшифровки и причина — параметры независимые, как в прод-коде: `transcribed` там
-     * читается из наличия `transcript.md`, а причина из `status.txt`, и «расшифрована» вовсе не
-     * значит «причины нет» (причина от фатального 401 остаётся лежать).
+     * Флаг расшифровки и причина — параметры независимые, потому что в прод-коде они читаются из
+     * РАЗНЫХ файлов: `transcribed` — из наличия `transcript.md`, причина — из `status.txt`. Выведи
+     * одно из другого — и станет непостроимым нужный здесь случай «не расшифрована, причины нет»
+     * (обрыв сети, пустой ответ вендора, просто очередь: воркер причину в этих исходах снимает).
      */
     private fun record(id: String, transcribed: Boolean, status: String = "") {
         val dir = NotesStore.noteDir(context, id)
@@ -91,6 +100,29 @@ class MainActivityTest {
             File(NotesStore.noteDir(context, "20260907-101500"), NotesStore.STATUS).exists(),
         )
         assertEquals(listOf("отменить 20260907-101500", "в очередь 20260907-101500"), log)
+    }
+
+    /**
+     * Обратная сторона того же решения: цепочку отменяем ТОЛЬКО у записи с причиной.
+     *
+     * Причины нет — значит запись не встала с известной бедой, а просто идёт: её `TranscribeWorker`
+     * прямо сейчас может заливать в ElevenLabs часовое аудио. Отмени такую цепочку — и 48 МБ уйдут
+     * в сеть второй раз, а владелец будет ждать заново. Ставим её в очередь всё равно: если работа
+     * и правда не кончена, `ExistingWorkPolicy.KEEP` ([PipelineQueue]) лишнюю постановку выбросит
+     * сам — ровно для этого политика и стоит.
+     */
+    @Test
+    fun `запись без причины только ставится в очередь — идущая заливка не обрывается`() {
+        record("20260907-101500", transcribed = false)
+        val log = mutableListOf<String>()
+
+        MainActivity.enqueueWaiting(
+            context,
+            enqueue = { log += "в очередь $it" },
+            cancel = { log += "отменить $it" },
+        )
+
+        assertEquals(listOf("в очередь 20260907-101500"), log)
     }
 
     /**
