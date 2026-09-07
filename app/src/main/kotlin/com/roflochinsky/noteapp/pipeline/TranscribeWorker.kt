@@ -25,12 +25,7 @@ class TranscribeWorker(context: Context, params: WorkerParameters) :
     override suspend fun doWork(): WorkResult =
         withContext(Dispatchers.IO) {
             val noteId = inputData.getString(KEY_NOTE_ID) ?: return@withContext WorkResult.failure()
-            transcribeNote(
-                dir = NotesStore.noteDir(applicationContext, noteId),
-                noteId = noteId,
-                key = Settings.elevenLabsKey(applicationContext),
-                stt = ElevenLabsClient()::transcribe,
-            )
+            transcribeById(applicationContext, noteId)
         }
 
     companion object {
@@ -44,7 +39,30 @@ class TranscribeWorker(context: Context, params: WorkerParameters) :
         private val FATAL = setOf(400, 401, 403)
 
         /**
-         * Всё решение по одной заметке; `doWork` вокруг только достаёт `noteId`, каталог и ключ.
+         * Всё, что `doWork` решает сам: чей каталог, чей ключ и какой вендор. Вынесено из `doWork`
+         * ровно затем, чтобы эти строки исполнял тест: собрать `CoroutineWorker` в юните нечем —
+         * `androidx.work:work-testing` в зависимостях нет, а `app/build.gradle.kts` этот срез не
+         * трогает. Цена подмены здесь тихая и дорогая: чужой ключ уводит каждую запись в вечный
+         * `retry` без единой расшифровки, и весь гейт при этом зелёный.
+         *
+         * @param stt тот же шов, что у [transcribeNote]; боевое значение по умолчанию —
+         *   единственный вендор пайплайна (Решение 1 ADR).
+         */
+        fun transcribeById(
+            context: Context,
+            noteId: String,
+            stt: (File, String) -> String = ElevenLabsClient()::transcribe,
+        ): WorkResult =
+            transcribeNote(
+                dir = NotesStore.noteDir(context, noteId),
+                noteId = noteId,
+                key = Settings.elevenLabsKey(context),
+                stt = stt,
+            )
+
+        /**
+         * Всё решение по одной заметке; [transcribeById] вокруг только выбирает каталог, ключ и
+         * вендора, а `doWork` — достаёт `noteId` из `Data`.
          *
          * Порядок веток и есть смысл: расшифрованную заметку не трогаем (бюджет спеки «ровно 1
          * запрос на запись» — это деньги), без ключа просим повторить, а не сдаёмся (запись обязана

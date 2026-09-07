@@ -24,11 +24,27 @@ class ElevenLabsClientTest {
     private var url: String? = null
     private var headers: Map<String, String> = emptyMap()
     private var declaredLength = 0L
-    private val sent = ByteArrayOutputStream()
+    private val sent = Recorder()
 
     private val audioBytes = "postanovochnye-bajty-zvuka"
 
-    private fun audio(): File = tmp.newFile("zapis.m4a").apply { writeText(audioBytes) }
+    private fun audio(bytes: String = audioBytes): File =
+        tmp.newFile("zapis.m4a").apply { writeText(bytes) }
+
+    /**
+     * Тело запроса и размер самой крупной записи в поток. Второе — единственное, чем «аудио идёт
+     * потоком» отличается от «аудио собрано в `ByteArray`»: байты тела и объявленная длина у них
+     * совпадают.
+     */
+    private class Recorder : ByteArrayOutputStream() {
+        var maxWrite = 0
+            private set
+
+        override fun write(b: ByteArray, off: Int, len: Int) {
+            maxWrite = maxOf(maxWrite, len)
+            super.write(b, off, len)
+        }
+    }
 
     private fun client(reply: SttReply) =
         ElevenLabsClient { requestUrl, requestHeaders, length, body ->
@@ -94,6 +110,25 @@ class ElevenLabsClientTest {
     fun `объявленная длина тела совпадает с записанной`() {
         client(SttReply(200, "{}")).transcribe(audio(), "xi-test-kluch")
         assertEquals(sent.size().toLong(), declaredLength)
+    }
+
+    /**
+     * Аудио уходит в поток **кусками**, а не одним массивом с записью целиком: часовая запись —
+     * около 48 МБ, и сборка её в `ByteArray` роняет приложение владельца по памяти. Соседний тест
+     * подмены не увидит — ни объявленная длина, ни байты тела от неё не меняются. Мерило общее, а
+     * не про размер буфера: у чтения файла целиком самая крупная запись равна файлу, у потоковой
+     * отправки — меньше него.
+     */
+    @Test
+    fun `аудио уходит в поток кусками, а не файлом целиком`() {
+        val big = "z".repeat(20_000)
+        client(SttReply(200, "{}")).transcribe(audio(big), "xi-test-kluch")
+
+        assertTrue("тело ${sent.size()} Б короче записи ${big.length} Б", sent.size() > big.length)
+        assertTrue(
+            "самая крупная запись ${sent.maxWrite} Б при записи ${big.length} Б",
+            sent.maxWrite < big.length,
+        )
     }
 
     /**

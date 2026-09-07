@@ -65,8 +65,11 @@ class ElevenLabsClient(
         const val ENDPOINT = "https://api.elevenlabs.io/v1/speech-to-text"
 
         /**
-         * Замороженный контракт запроса (Решение 2 ADR) — ровно шесть полей вместе с `file`.
-         * `keyterms` здесь нет: словарь приезжает частью 2 вместе с первым потребителем.
+         * Замороженный контракт запроса (Решение 2 ADR): `model_id`, `language_code`, `diarize`,
+         * `timestamps_granularity`, `tag_audio_events` — и `keyterms`, который то же Решение 2
+         * морозит наравне с ними. Шесть полей вместе с `file` — граница **этого среза**, а не
+         * запрет ADR на седьмое поле: словарь приезжает частью 2 вместе с первым потребителем
+         * (реестры `people.md` и `projects.md`, `nikitatrubaev-7cy.2`).
          */
         val FIELDS =
             linkedMapOf(

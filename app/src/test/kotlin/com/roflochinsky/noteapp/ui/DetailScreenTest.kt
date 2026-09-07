@@ -257,10 +257,14 @@ class DetailScreenTest {
     }
 
     /**
-     * Критерий приёмки 4: заметка, распознанная ещё Deepgram, открывается как прежде. Каталог
-     * собран из живого ответа Deepgram — рядом с `transcript.md` лежит `transcript.json` старой
-     * формы. Смена вендора её не касается: экран разбирает `transcript.md`, а не JSON
-     * (`DetailScreen.kt:99-102`), и в приложении `transcript.json` пока никто не читает.
+     * Критерий приёмки 4: заметка, распознанная ещё Deepgram, открывается как прежде.
+     *
+     * Что этот тест **видит**: `transcript.md`, собранный `fromDeepgramJson` из живого ответа
+     * старого вендора, экран рисует целиком — каждую реплику её текстом и подписью говорящего. Чего
+     * он **не видит**: разбор самого `transcript.json`. Файл кладётся рядом только ради
+     * достоверности каталога (так выглядит заметка эпохи Deepgram), экран его не читает
+     * (`DetailScreen.kt:99-102`) и в приложении не читает никто — «старый JSON разбирается как
+     * прежде» держат тесты `fromDeepgramJson`, а не этот.
      */
     @Test
     fun `старая заметка от Deepgram открывается и показывает транскрипт`() {
@@ -278,7 +282,13 @@ class DetailScreenTest {
         screen(item = FeedItem("20260824-1807", old, null))
         compose.onNodeWithText("Транскрипт").performClick()
         compose.onNodeWithText("Смотрю, новый").assertExists()
-        compose.onAllNodesWithText("Спикер 1").assertCountEquals(md.lines().size)
+        // «Экран нарисовал все реплики» — это текст каждой из них на экране. Счёт подписей
+        // «Спикер 1» мерил бы другое: что все реплики фикстуры от одного говорящего.
+        val lines = md.lines().filter(String::isNotBlank)
+        lines.forEach { line -> compose.onNodeWithText(line.substringAfter(": ")).assertExists() }
+        compose
+            .onAllNodesWithText("Спикер 1")
+            .assertCountEquals(lines.count { it.contains("] Спикер 1:") })
     }
 
     private fun record() =
