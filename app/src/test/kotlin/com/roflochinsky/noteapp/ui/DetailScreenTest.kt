@@ -4,6 +4,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -13,6 +14,8 @@ import com.roflochinsky.noteapp.pipeline.NoteFile
 import com.roflochinsky.noteapp.pipeline.NoteRef
 import com.roflochinsky.noteapp.pipeline.NotesStore
 import com.roflochinsky.noteapp.pipeline.TaskFile
+import com.roflochinsky.noteapp.pipeline.TranscriptMapper
+import java.io.File
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -20,6 +23,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.GraphicsMode
 
 /**
@@ -250,6 +254,31 @@ class DetailScreenTest {
         compose.onNodeWithText("встреча").assertDoesNotExist()
         compose.onNodeWithText("Открыть в GitHub").assertDoesNotExist()
         assertNull(edit)
+    }
+
+    /**
+     * Критерий приёмки 4: заметка, распознанная ещё Deepgram, открывается как прежде. Каталог
+     * собран из живого ответа Deepgram — рядом с `transcript.md` лежит `transcript.json` старой
+     * формы. Смена вендора её не касается: экран разбирает `transcript.md`, а не JSON
+     * (`DetailScreen.kt:99-102`), и в приложении `transcript.json` пока никто не читает.
+     */
+    @Test
+    fun `старая заметка от Deepgram открывается и показывает транскрипт`() {
+        val old = record()
+        val json =
+            requireNotNull(javaClass.classLoader?.getResource("deepgram-sample-response.json")) {
+                    "нет образца Deepgram"
+                }
+                .readText()
+        val md = TranscriptMapper.toMarkdown(TranscriptMapper.fromDeepgramJson(json))
+        val dir = NotesStore.noteDir(RuntimeEnvironment.getApplication(), old.id)
+        File(dir, NotesStore.TRANSCRIPT_JSON).writeText(json)
+        File(dir, NotesStore.TRANSCRIPT_MD).writeText(md)
+
+        screen(item = FeedItem("20260824-1807", old, null))
+        compose.onNodeWithText("Транскрипт").performClick()
+        compose.onNodeWithText("Смотрю, новый").assertExists()
+        compose.onAllNodesWithText("Спикер 1").assertCountEquals(md.lines().size)
     }
 
     private fun record() =
