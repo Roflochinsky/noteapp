@@ -32,11 +32,23 @@ class TranscribeWorker(context: Context, params: WorkerParameters) :
         const val KEY_NOTE_ID = "noteId"
         private const val ERR_PREVIEW = 200
 
+        /** Причина в [NotesStore.STATUS], когда ключа ElevenLabs нет вовсе. */
+        private const val NO_KEY = "нет ключа ElevenLabs"
+
         /**
-         * Коды, после которых повторять бессмысленно: ключ, права или сам запрос сами не починятся,
-         * а каждая попытка — 48 МБ трафика на часовой записи.
+         * 4xx, которые всё-таки про «попробуй позже»: 408 — таймаут запроса, 429 — лимит. Остальные
+         * 4xx неисправимы (решение ведущего по находке П4 ревью среза 1).
          */
-        private val FATAL = setOf(400, 401, 403)
+        private val RETRYABLE_4XX = setOf(408, 429)
+
+        private val CLIENT_ERRORS = 400..499
+
+        /**
+         * Повторять бессмысленно: ключ, права или сам запрос сами не починятся, а каждая попытка —
+         * 48 МБ трафика на часовой записи. До решения ведущего фатальными были ровно 400/401/403, и
+         * 404 (не тот путь) с 422 (не то тело) уходили в бесконечные повторы.
+         */
+        private fun fatal(code: Int) = code in CLIENT_ERRORS && code !in RETRYABLE_4XX
 
         /**
          * Всё, что `doWork` решает сам: чей каталог, чей ключ и какой вендор. Вынесено из `doWork`
@@ -72,7 +84,8 @@ class TranscribeWorker(context: Context, params: WorkerParameters) :
          *
          * Порядок веток и есть смысл: расшифрованную заметку не трогаем (бюджет спеки «ровно 1
          * запрос на запись» — это деньги), без ключа просим повторить, а не сдаёмся (запись обязана
-         * дождаться ключа в очереди), и только отказ по коду из [FATAL] кончает попытки.
+         * дождаться ключа в очереди), и попытки кончает только неисправимый отказ вендора — любой
+         * 4xx, кроме 408 и 429 (см. [fatal]).
          *
          * @param stt шов распознавания: в бою [ElevenLabsClient.transcribe], в тестах фейк — иначе
          *   проверить судьбу записи при 401 и при обрыве сети можно было бы только живым ключом.
@@ -89,6 +102,7 @@ class TranscribeWorker(context: Context, params: WorkerParameters) :
                 File(dir, NotesStore.TRANSCRIPT_MD).exists() -> WorkResult.success()
                 key == null -> {
                     Log.w(Probe.LOG_TAG, "PROBE:STT_SKIP no_key note=$noteId")
+                    reason(dir, NO_KEY)
                     WorkResult.retry()
                 }
                 else -> recognize(audio, dir, noteId, key, stt)
@@ -105,17 +119,60 @@ class TranscribeWorker(context: Context, params: WorkerParameters) :
             try {
                 val json = stt(audio, key)
                 // Ответ вендора кладётся целиком: его читают будущие срезы (прокрут по словам).
-                File(dir, NotesStore.TRANSCRIPT_JSON).writeText(json)
+                NotesStore.writeAtomic(File(dir, NotesStore.TRANSCRIPT_JSON), json)
                 val md = TranscriptMapper.toMarkdown(TranscriptMapper.fromElevenLabsJson(json))
-                File(dir, NotesStore.TRANSCRIPT_MD).writeText(md)
-                Log.i(Probe.LOG_TAG, "PROBE:STT_OK note=$noteId chars=${md.length}")
-                WorkResult.success()
+                clearReason(dir)
+                if (md.isBlank()) {
+                    // Слов в ответе нет. Пустой `transcript.md` был бы приговором: заметка
+                    // навсегда считалась бы расшифрованной, и пустой транскрипт уехал бы в репо.
+                    Log.w(Probe.LOG_TAG, "PROBE:STT_EMPTY note=$noteId")
+                    WorkResult.retry()
+                } else {
+                    NotesStore.writeAtomic(File(dir, NotesStore.TRANSCRIPT_MD), md)
+                    Log.i(Probe.LOG_TAG, "PROBE:STT_OK note=$noteId chars=${md.length}")
+                    WorkResult.success()
+                }
             } catch (e: SttError) {
                 Log.w(Probe.LOG_TAG, "PROBE:STT_HTTP note=$noteId code=${e.code}")
-                if (e.code in FATAL) WorkResult.failure() else WorkResult.retry()
+                if (fatal(e.code)) {
+                    reason(dir, "ошибка ElevenLabs ${e.code}\n${preview(e.body)}")
+                    WorkResult.failure()
+                } else {
+                    clearReason(dir)
+                    WorkResult.retry()
+                }
             } catch (e: IOException) {
                 Log.w(Probe.LOG_TAG, "PROBE:STT_RETRY note=$noteId ${e.message?.take(ERR_PREVIEW)}")
+                clearReason(dir)
                 WorkResult.retry()
             }
+
+        /**
+         * Причина кладётся рядом с записью файлом — по действующему правилу [NotesStore] «статус
+         * это наличие файлов, отдельного state-файла нет». Пишется там, где причина известна: нет
+         * ключа и отказ вендора по неисправимому коду.
+         */
+        private fun reason(dir: File, text: String) =
+            NotesStore.writeAtomic(File(dir, NotesStore.STATUS), text)
+
+        /**
+         * Причина снимается на любом исходе СОСТОЯВШЕЙСЯ попытки распознавания, кроме новой
+         * известной причины: удача, пустой ответ, обрыв сети, «попробуй позже». Иначе строка «нет
+         * ключа ElevenLabs» пережила бы попытку, сделанную уже с ключом, и врала бы владельцу в
+         * ленте до самой удачной расшифровки.
+         *
+         * Ранние ветки [transcribeNote] («записи нет» и «уже расшифрована») сюда не заходят: до
+         * попытки дело не доходит, а причины у такой заметки и не бывает — `transcript.md` пишет
+         * только `recognize`, и он снимает причину до того. Протухшую причину снимает ещё одно
+         * место, вне воркера: `MainActivity.enqueueWaiting` в момент ввода ключа — там она устарела
+         * по построению, а воркер до неё доберётся только на следующей попытке. Само стирание
+         * поэтому живёт в [NotesStore.clearStatus] — каталогом записи заведует хранилище.
+         */
+        private fun clearReason(dir: File) = NotesStore.clearStatus(dir)
+
+        /** Начало тела ответа одной строкой: вторая строка причины — для плашки деталки. */
+        private fun preview(body: String) = body.take(ERR_PREVIEW).replace(WHITESPACE, " ").trim()
+
+        private val WHITESPACE = Regex("""\s+""")
     }
 }

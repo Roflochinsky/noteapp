@@ -26,16 +26,53 @@ class NoteRefTest {
 
     private fun note(path: String, md: String) = checkNotNull(NoteFile.parse(path, md))
 
-    private fun record(id: String, pushed: Boolean = true) =
+    // `transcribed` и `status` — параметры независимые, потому что в прод-коде они читаются из
+    // РАЗНЫХ файлов: флаг расшифровки — из наличия `transcript.md`, причина — из `status.txt`.
+    // Выведи одно из другого — и станет непостроимым нужный здесь случай «не расшифрована, причина
+    // лежит», ради которого фикстура и заведена.
+    private fun record(
+        id: String,
+        pushed: Boolean = true,
+        status: String = "",
+        transcribed: Boolean = true,
+    ) =
         NotesStore.Note(
             id = id,
             hasAudio = true,
-            transcribed = true,
+            transcribed = transcribed,
             pushed = pushed,
             durationSec = 751,
             title = "Смотри, по релизу",
             preview = "Смотри, по релизу",
+            status = status,
         )
+
+    /**
+     * Причина, по которой заметка не расшифровалась, приезжает в строку ленты двумя видами: лента
+     * берёт первую строку, деталке достаётся вся — там есть место под начало ответа вендора.
+     *
+     * Причину знает только телефон: у строки из одного файла репо её взять неоткуда, и заметка,
+     * доехавшая до репо, расшифрована по построению.
+     */
+    @Test
+    fun `причина ленты — первая строка, причина деталки — вся`() {
+        val waiting =
+            record(
+                "20260824-180732",
+                pushed = false,
+                status = "ошибка ElevenLabs 401\n{\"detail\":\"invalid_api_key\"}",
+                transcribed = false,
+            )
+        val rows =
+            NoteRef.merge(listOf(waiting), listOf(note("встречи/2026-08-12-1922-x.md", vone)))
+
+        val row = rows.first { it.noteId == waiting.id }
+        assertEquals("ошибка ElevenLabs 401", row.statusLine)
+        assertEquals("""ошибка ElevenLabs 401 · {"detail":"invalid_api_key"}""", row.statusDetail)
+        val fromRepo = rows.first { it.noteId == null }
+        assertEquals("", fromRepo.statusLine)
+        assertEquals("", fromRepo.statusDetail)
+    }
 
     /**
      * Конечный путь заметки после переноса Action-ом — не из головы: его называет `source:`

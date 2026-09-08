@@ -166,6 +166,21 @@ data class FeedItem(val ref: String, val local: NotesStore.Note?, val note: Note
     val transcribed: Boolean
         get() = local?.transcribed ?: true
 
+    /**
+     * Почему заметка ещё не расшифрована, словами: первая строка [NotesStore.STATUS]. Пусто —
+     * причина неизвестна, и лента говорит общее «в очереди — расшифровка».
+     *
+     * Причину знает только телефон: заметка, доехавшая до репо, уже расшифрована по построению.
+     */
+    val statusLine: String
+        get() = local?.status.orEmpty().lines().first()
+
+    /**
+     * Та же причина плюс начало ответа вендора: в плашке деталки для него есть место, в ленте нет.
+     */
+    val statusDetail: String
+        get() = local?.status.orEmpty().lines().filter(String::isNotBlank).joinToString(" · ")
+
     /** Файл в кэше репо — доставка уже доказана, флажок `pushed.txt` тут не нужен. */
     val pushed: Boolean
         get() = note != null || local?.pushed == true

@@ -90,26 +90,44 @@ class TranscribeWorkerTest {
         }
     }
 
-    /** 429 и 5xx — вендор просит подождать, а не сдаться. */
+    /**
+     * 408, 429 и 5xx — вендор просит подождать, а не сдаться. Заодно снимается устаревшая причина,
+     * тем же движением, что в соседнем тесте про обрыв сети.
+     *
+     * Причина к этому месту доходит настоящая: у записи лежит «ошибка ElevenLabs 404» от прошлого
+     * фатального отказа (цепочка после него в `FAILED`, то есть завершена, — тап «Повторить»
+     * проходит мимо `KEEP`), владелец тапает, ElevenLabs отвечает 429 «слишком часто». Не сними
+     * причину — и лента с плашкой деталки продолжат называть 404, которого уже нет, пока запись
+     * тихо повторяется.
+     */
     @Test
-    fun `перегрузка и сбой вендора — retry`() {
-        listOf(429, 500, 503).forEach { code ->
-            val dir = tmp.newFolder("note-$code")
-            File(dir, NotesStore.AUDIO).writeText("postanovochnye-bajty-zvuka")
-            val result =
-                TranscribeWorker.transcribeNote(dir, "note-$code", "xi-test-kluch") { _, _ ->
-                    throw SttError(code, "busy")
-                }
+    fun `перегрузка и сбой вендора — retry, устаревшая причина снята`() {
+        listOf(408, 429, 500, 503).forEach { code ->
+            val dir = noteDir(name = "note-$code")
+            File(dir, NotesStore.STATUS).writeText(STALE_REASON)
+
+            val result = run(dir) { _, _ -> throw SttError(code, "busy") }
+
             assertEquals("код $code", ListenableWorker.Result.retry(), result)
+            assertFalse(
+                "код $code: причина пережила попытку — экран назовёт беду, которой уже нет",
+                File(dir, NotesStore.STATUS).exists(),
+            )
         }
     }
 
+    /**
+     * Сеть моргнула — заметка молча ждёт дальше. Заодно снимается устаревшая причина: владелец уже
+     * ввёл ключ, а строка «нет ключа ElevenLabs» пережила бы попытку и врала бы ему в ленте.
+     */
     @Test
-    fun `сетевой сбой — retry`() {
+    fun `сетевой сбой — retry, устаревшая причина снята`() {
         val dir = noteDir()
+        File(dir, NotesStore.STATUS).writeText(NO_KEY)
         val result = run(dir) { _, _ -> throw IOException("сеть моргнула") }
         assertEquals(ListenableWorker.Result.retry(), result)
         assertFalse(File(dir, NotesStore.TRANSCRIPT_MD).exists())
+        assertFalse(File(dir, NotesStore.STATUS).exists())
     }
 
     /**
@@ -178,7 +196,143 @@ class TranscribeWorkerTest {
         assertEquals(0, calls)
     }
 
+    /**
+     * Критерий приёмки 5. Без ключа заметка не пропадает молча: рядом с записью ложится причина
+     * словами, и лента показывает её вместо общего «в очереди — расшифровка».
+     *
+     * Судьба записи здесь намеренно НЕ проверяется — за «осталась в очереди» отвечает тест выше.
+     * Свали их в один, и одна подмена валила бы сразу двух стражей: по падению уже не понять,
+     * потеряли мы запись или перестали объяснять владельцу, почему она стоит.
+     */
+    @Test
+    fun `нет ключа — причина видна словами`() {
+        val dir = noteDir()
+        run(dir, key = null)
+        assertEquals(listOf(NO_KEY), File(dir, NotesStore.STATUS).readLines())
+    }
+
+    /**
+     * Критерий приёмки 6. Вендор отказал — владелец видит код и начало тела ответа: без кода «ключ
+     * с опечаткой» (401) и «ключ без права Speech to Text» (403) выглядят одинаково. Первая строка
+     * — для ленты, вторая — для плашки деталки.
+     *
+     * Тело подаётся многострочным намеренно. Файл причины по контракту [NotesStore.STATUS] — ровно
+     * две строки, и держит этот контракт единственное место: схлопывание пробельных символов в
+     * `preview`. Дай телу развалить файл на четыре строки — и `statusDetail` склеит лишние куски
+     * через ` · ` в плашку деталки. Поэтому сверка идёт со ВСЕМИ строками файла, а не с `contains`.
+     */
+    @Test
+    fun `отказ вендора — в причине код и начало тела ответа одной строкой`() {
+        val dir = noteDir()
+        run(dir) { _, _ -> throw SttError(401, "{\n  \"detail\": \"invalid_api_key\"\n}") }
+        assertEquals(
+            listOf("ошибка ElevenLabs 401", """{ "detail": "invalid_api_key" }"""),
+            File(dir, NotesStore.STATUS).readLines(),
+        )
+    }
+
+    /**
+     * Решение ведущего по находке П4 ревью среза 1: неисправимы **все** 4xx, кроме 408 и 429. До
+     * него фатальными были ровно 400/401/403, поэтому 404 (не тот путь) и 422 (не то тело) уходили
+     * в бесконечные повторы по 48 МБ на каждой часовой записи.
+     */
+    @Test
+    fun `прочие 4xx — тоже failure, а не вечные повторы`() {
+        listOf(404, 422).forEach { code ->
+            val dir = noteDir(name = "note-$code")
+            assertEquals(
+                "код $code",
+                ListenableWorker.Result.failure(),
+                run(dir) { _, _ -> throw SttError(code, "нет такого пути") },
+            )
+        }
+    }
+
+    /** Расшифровка удалась — причины больше нет, и лента снова показывает обычную заметку. */
+    @Test
+    fun `удачная расшифровка снимает причину`() {
+        val dir = noteDir()
+        File(dir, NotesStore.STATUS).writeText(NO_KEY)
+        assertEquals(ListenableWorker.Result.success(), run(dir))
+        assertFalse(File(dir, NotesStore.STATUS).exists())
+    }
+
+    /**
+     * Вендор ответил, но слов в ответе нет. Пустой `transcript.md` был бы приговором: воркер при
+     * существующем файле выходит `success` и заметку больше никогда не перераспознаёт, а в репо
+     * заметок уехал бы пустой транскрипт. Причина при этом не пишется: слов на экране для неё
+     * ведущий не назначил, и запись честно остаётся в общей очереди.
+     */
+    @Test
+    fun `пустой ответ вендора не выдаётся за расшифровку`() {
+        val dir = noteDir()
+        val result = run(dir) { _, _ -> """{"language_code":"rus","text":"","words":[]}""" }
+        assertEquals(ListenableWorker.Result.retry(), result)
+        assertFalse(File(dir, NotesStore.TRANSCRIPT_MD).exists())
+    }
+
+    /**
+     * Обрыв записи: `transcript.md` виден целиком или не виден вовсе — и пишет его ВОРКЕР, а не
+     * тест, то есть с той стороны, с которой обрыв случается в бою.
+     *
+     * Цена прямой записи тихая и дорогая. Убитый посреди `writeText` процесс оставляет обрезанный
+     * `transcript.md`, а он навсегда выключает перераспознавание (воркер при существующем файле
+     * выходит `success`) и молча уезжает в GitHub куском разговора.
+     *
+     * Тест держит обе половины разом, поэтому второго теста на ту же гонку в классе нет: сам хелпер
+     * [NotesStore.writeAtomic] (подмени его тело на `file.writeText(text)` — читатель увидит кусок)
+     * и то, что воркер его ЗОВЁТ (подмени вызов в `recognize` на прямой `writeText` — содержимое в
+     * спокойном прогоне не изменится ни на байт, и все прочие тесты класса останутся зелёными).
+     *
+     * Убить процесс в юните нечем, поэтому обрыв ловится читателем в соседнем потоке. Форма — по
+     * замеру харнеса (`docs/harness/epic.md`, «Мутационная проверка»): гонка ловится числом
+     * попыток, а не размером данных, поэтому здесь короткая расшифровка и много кругов. Прямая
+     * запись открывает файл с усечением, и окно нулевой длины есть на каждом круге; при `.tmp` +
+     * `renameTo` читатель видит либо отсутствие файла, либо его целиком. Красным этот тест может
+     * стать ТОЛЬКО от подмены записи: на честном коде обрезанного файла не увидеть ни при какой
+     * раскладке потоков, поэтому мигать он не может. Образец повтора вместо сна — `RepoCacheTest`.
+     *
+     * Двух других мест вызова [NotesStore.writeAtomic] (`transcript.json` и файл причины) тест не
+     * видит — стража у них нет, это названный долг среза: цена там на порядок ниже.
+     */
+    @Test
+    fun `воркер кладёт transcript md целиком или никак`() {
+        val dir = noteDir()
+        val file = File(dir, NotesStore.TRANSCRIPT_MD)
+        run(dir) { _, _ -> ONE_WORD }
+        val whole = file.readText()
+        val torn = java.util.concurrent.atomic.AtomicReference<String>()
+        val done = java.util.concurrent.atomic.AtomicBoolean(false)
+        val reader = Thread {
+            while (!done.get() && torn.get() == null) {
+                runCatching { file.readText() }.getOrNull()?.takeIf { it != whole }?.let(torn::set)
+            }
+        }
+
+        reader.start()
+        repeat(WORKER_WRITES) {
+            file.delete()
+            run(dir) { _, _ -> ONE_WORD }
+        }
+        done.set(true)
+        reader.join()
+
+        assertEquals("читатель увидел кусок файла: ${torn.get()}", null, torn.get())
+        assertEquals(whole, file.readText())
+    }
+
     private companion object {
         const val OLD_MD = "[00:00] Спикер 1: старая заметка"
+        const val NO_KEY = "нет ключа ElevenLabs"
+
+        /** Причина от прошлого фатального отказа — та, что обязана уйти на повторяемом коде. */
+        const val STALE_REASON = "ошибка ElevenLabs 404\nнет такого пути"
+
+        /** Одно слово одного спикера: короткая расшифровка, чтобы круг стоил дёшево. */
+        const val ONE_WORD =
+            """{"words":[{"type":"word","text":"слово","start":0.0,"end":0.5,""" +
+                """"speaker_id":"speaker_0"}]}"""
+
+        const val WORKER_WRITES = 3_000
     }
 }

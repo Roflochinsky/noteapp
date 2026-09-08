@@ -205,6 +205,30 @@ class DetailScreenTest {
         compose.onNodeWithText("Поделиться").assertDoesNotExist()
     }
 
+    /**
+     * Критерий приёмки 6: в деталке к причине добавляется начало тела ответа — здесь для него есть
+     * место, в строке ленты его нет.
+     *
+     * «Повторить» остаётся на месте, и тест видит ровно это: клик доходит до `onRetry`. Что тап
+     * делает дальше, он не видит и обещать за него не может: запись уходит в очередь заново, только
+     * если её цепочка завершена (фатальный код), а на записи в `retry` `KEEP` постановку
+     * выбрасывает — долг 1 среза.
+     */
+    @Test
+    fun `причина отказа видна в плашке вместе с телом ответа`() {
+        val waiting =
+            record()
+                .copy(
+                    transcribed = false,
+                    status = "ошибка ElevenLabs 401\n{\"detail\":\"invalid_api_key\"}",
+                )
+        screen(item = item(local = waiting, note = null))
+        compose
+            .onNodeWithText("""ошибка ElevenLabs 401 · {"detail":"invalid_api_key"} · Повторить""")
+            .performClick()
+        assertEquals(1, retried)
+    }
+
     @Test
     fun `ожидающая правка видна янтарной строкой`() {
         screen(pending = true)

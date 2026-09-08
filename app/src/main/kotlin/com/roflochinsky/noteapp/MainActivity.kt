@@ -2,6 +2,7 @@ package com.roflochinsky.noteapp
 
 import android.Manifest
 import android.app.role.RoleManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -28,6 +29,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
+import androidx.work.WorkManager
 import com.roflochinsky.noteapp.pipeline.GithubClient
 import com.roflochinsky.noteapp.pipeline.NoteFile
 import com.roflochinsky.noteapp.pipeline.NoteRef
@@ -268,7 +270,10 @@ class MainActivity : ComponentActivity() {
         }
         when (dialog) {
             "elevenlabs" ->
-                InputDialog("Ключ ElevenLabs") { Settings.setElevenLabsKey(this@MainActivity, it) }
+                InputDialog("Ключ ElevenLabs") {
+                    Settings.setElevenLabsKey(this@MainActivity, it)
+                    enqueueWaiting(this@MainActivity)
+                }
             "github" ->
                 InputDialog("GitHub-токен (репо заметок)") {
                     Settings.setGithubToken(this@MainActivity, it)
@@ -501,27 +506,82 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    private fun setupComplete(): Boolean {
-        val role =
-            getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT)
-                ?: false
-        val mic =
-            checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
-                PackageManager.PERMISSION_GRANTED
-        // Ключ распознавания — ElevenLabs: по старому ключу Deepgram онбординг был бы зелёным, и
-        // владелец шага «Ключ ElevenLabs» не увидел бы вовсе.
-        return role &&
-            mic &&
-            Settings.elevenLabsKey(this) != null &&
-            Settings.githubToken(this) != null
-    }
+    private fun setupComplete(): Boolean = setupComplete(this)
 
     override fun onResume() {
         super.onResume()
         permTick++
     }
 
-    private companion object {
-        const val POLL_MS = 1000L
+    companion object {
+        private const val POLL_MS = 1000L
+
+        /**
+         * Ключ приехал — записи, ждавшие его в очереди, уходят сами: владелец не должен тапать по
+         * каждой заметке, накопившейся без ключа.
+         *
+         * Каждой такой записи достаётся два действия, и ни одно не лишнее:
+         * 1. **причина стирается, и по ней же видно, надо ли отменять цепочку.** Причина протухла
+         *    по построению: строка «нет ключа ElevenLabs» относится к ключу, которого больше нет, а
+         *    пишет и снимает файл только сам [TranscribeWorker], до следующей попытки он до неё не
+         *    доберётся. Причина лежала — значит запись встала с известной бедой, и её цепочка
+         *    `note-<id>` висит в WorkManager незавершённой (воркер вернул `retry`), а
+         *    `ExistingWorkPolicy.KEEP` ([PipelineQueue]) при незавершённой работе новый запрос
+         *    выбрасывает: без отмены постановка ниже не делает ничего, и момент расшифровки
+         *    остаётся за откатом, назначенным ещё ДО ввода ключа (`BackoffPolicy.EXPONENTIAL` от 30
+         *    с упирается в потолок WorkManager в 5 часов);
+         * 2. **запись ставится заново.** Ставятся ВСЕ нерасшифрованные, а не только те, у кого была
+         *    причина: для остальных `KEEP` сам сделает верное.
+         *
+         * **Почему отмена сужена до записей с причиной.** Отмена — единственное место, где мы
+         * пробиваем `KEEP` насквозь, а он бережёт от повторной заливки 48 МБ, когда запись и правда
+         * ещё в работе. У идущей прямо сейчас заливки файла причины нет; отмени её цепочку по
+         * сохранению ключа (в том числе НЕИЗМЕНЁННОГО — поле диалога предзаполнено текущим) — и
+         * часовая запись поедет в сеть второй раз с нуля.
+         *
+         * Расшифрованные записи не трогаем: их цепочка кончается пушем, и лишний прогон стоил бы
+         * лишнего похода в GitHub на каждую старую заметку.
+         *
+         * Вынесено из диалога ровно затем, чтобы эти строки исполнял тест (образец —
+         * `TranscribeWorker.transcribeById`): собрать `Activity` в юните дорого. Значения [enqueue]
+         * и [cancel] по умолчанию остаются объявленным долгом — проводку «диалог → очередь» ловит
+         * прокликка.
+         */
+        internal fun enqueueWaiting(
+            context: Context,
+            enqueue: (String) -> Unit = { PipelineQueue.enqueue(context, it) },
+            cancel: (String) -> Unit = {
+                WorkManager.getInstance(context).cancelUniqueWork(PipelineQueue.NOTE_PREFIX + it)
+            },
+        ) =
+            NotesStore.list(context)
+                .filterNot { it.transcribed }
+                .map { it.id }
+                .forEach { id ->
+                    if (NotesStore.clearStatus(NotesStore.noteDir(context, id))) {
+                        cancel(id)
+                    }
+                    enqueue(id)
+                }
+
+        /**
+         * Онбординг пройден. Ключ распознавания — ElevenLabs: ключ Deepgram спека велит не стирать
+         * (путь отката ADR), поэтому он лежит в хранилище у каждого владельца, и сверься онбординг
+         * с ним — шага «Ключ ElevenLabs» владелец не увидел бы вовсе, а каждая запись ушла бы в
+         * вечный `retry` при зелёном экране.
+         */
+        internal fun setupComplete(context: Context): Boolean {
+            val role =
+                context
+                    .getSystemService(RoleManager::class.java)
+                    ?.isRoleHeld(RoleManager.ROLE_ASSISTANT) ?: false
+            val mic =
+                context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
+                    PackageManager.PERMISSION_GRANTED
+            return role &&
+                mic &&
+                Settings.elevenLabsKey(context) != null &&
+                Settings.githubToken(context) != null
+        }
     }
 }

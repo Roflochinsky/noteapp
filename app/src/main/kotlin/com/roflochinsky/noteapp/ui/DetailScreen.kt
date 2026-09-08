@@ -554,6 +554,16 @@ private fun AudioTab(audio: File?, marks: List<Long>) {
  * Три состояния (решение владельца 2026-08-26 (б)): доставлено — путь и напоминание, что транскрипт
  * не редактируется; правка в очереди — янтарь; запись ещё не уехала — янтарное «не отправлено ·
  * Повторить», куда переехала кнопка «Повторить отправку» (а «Поделиться» из деталки ушло).
+ *
+ * Известную причину («нет ключа ElevenLabs», «ошибка ElevenLabs 401») она называет вместо общего
+ * «не отправлено» и добавляет начало ответа вендора: в ленте места на него нет, а без него 401 от
+ * ключа с опечаткой не отличить от 401 отозванного ключа.
+ *
+ * «Повторить» остаётся, но обещать больше, чем оно делает, нельзя: тап ставит запись в очередь
+ * заново, **только если её цепочка уже завершена** (фатальный код — цепочка в `FAILED`). Пока
+ * цепочка в `retry` (обрыв сети, 429, пустой ответ вендора), `ExistingWorkPolicy.KEEP`
+ * (`PipelineQueue`) постановку выбрасывает, и тап не делает ничего — объявленный долг 1 среза
+ * `nikitatrubaev-u4g.2`: `MainActivity.onRetry` зовёт очередь без отмены цепочки.
  */
 @Composable
 private fun StatusLine(item: FeedItem, pending: Boolean, onRetry: () -> Unit) {
@@ -572,8 +582,10 @@ private fun StatusLine(item: FeedItem, pending: Boolean, onRetry: () -> Unit) {
         when {
             path == null ->
                 Text(
-                    "не отправлено · Повторить",
+                    item.statusDetail.ifEmpty { "не отправлено" } + " · Повторить",
                     style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.Amber),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
             pending ->
                 Text(

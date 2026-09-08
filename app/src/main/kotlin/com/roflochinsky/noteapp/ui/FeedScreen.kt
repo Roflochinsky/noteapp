@@ -217,9 +217,13 @@ private fun NoteItem(note: FeedItem, onClick: () -> Unit) {
                 modifier = Modifier.padding(top = 4.dp),
             )
         } else {
-            // Очередь — янтарь, как и вся очередь этого мира (вердикт UX; было синим).
+            // Очередь — янтарь, как и вся очередь этого мира (вердикт UX; было синим). Известную
+            // причину лента называет словами, и сегодня их ровно две: «нет ключа ElevenLabs» и
+            // «ошибка ElevenLabs <код>» — иначе отозванный ключ и ключ с опечаткой выглядят для
+            // владельца одинаково. Обрыв сети сюда не попадает намеренно: воркер причину в этом
+            // случае снимает, и остаётся общее «в очереди — расшифровка».
             Text(
-                "в очереди — расшифровка",
+                note.statusLine.ifEmpty { "в очереди — расшифровка" },
                 style = MaterialTheme.typography.bodySmall.copy(color = DocPalette.Amber),
                 modifier = Modifier.padding(top = 4.dp),
             )
