@@ -31,6 +31,34 @@ class RepoStoreReliabilityTest {
             .also { assertEquals(SyncStatus.OK, it.refresh()) }
 
     @Test
+    fun `edit queued and cancelled within refresh never certifies a stale base`() {
+        val remote = api()
+        remote.put(other, text.replace("First", "Other"))
+        var onBlob: (() -> Unit)? = null
+        val api =
+            object : GithubApi by remote {
+                override fun readBlob(sha: String): String {
+                    val result = remote.readBlob(sha)
+                    onBlob?.also { onBlob = null }?.invoke()
+                    return result
+                }
+            }
+        val store = store(api)
+        remote.put(path, text.replace("priority: P1", "priority: P3"))
+        remote.put(other, text.replace("First", "Changed other"))
+        remote.onTree = {
+            remote.onTree = null
+            val id = store.edit(path, Edit.SetField("priority", "P2"))
+            onBlob = { store.cancel(id) }
+        }
+
+        assertEquals(SyncStatus.OK, store.refresh())
+        assertTrue(store.pendingPaths().isEmpty())
+        assertEquals(SyncStatus.OK, store.refresh())
+        assertEquals("P3", store.view().tasks.single { it.path == path }.priority)
+    }
+
+    @Test
     fun `connection lost while reading conflict keeps the operation retryable`() {
         val remote = api()
         var disconnected = true

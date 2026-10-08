@@ -52,6 +52,7 @@ fun CommunicationsScreen(
     onSave: (Communication, () -> Unit) -> Unit,
     onExport: (String?, Boolean) -> Unit,
     onTasks: () -> Unit = {},
+    notice: String? = null,
 ) {
     var editing by rememberSaveable { mutableStateOf(false) }
     var draft by
@@ -89,6 +90,13 @@ fun CommunicationsScreen(
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(horizontal = 22.dp, vertical = 8.dp),
             )
+        notice?.let {
+            Text(
+                it,
+                color = DocPalette.Green,
+                modifier = Modifier.padding(horizontal = 22.dp, vertical = 8.dp),
+            )
+        }
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (editing) {
             inputError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -326,7 +334,7 @@ private fun CommunicationEditor(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 22.dp)
     ) {
         Text(
-            "Сохранение только на устройстве. Исходный текст не отправляется в STT или GitHub.",
+            "Сохранение только на устройстве. Исходный текст не отправляется на распознавание или в GitHub.",
             style = MaterialTheme.typography.bodySmall,
         )
         EditField("Заголовок", value.title, enabled = !busy) { onChange(value.copy(title = it)) }

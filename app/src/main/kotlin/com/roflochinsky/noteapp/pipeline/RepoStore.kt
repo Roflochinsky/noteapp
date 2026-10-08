@@ -331,18 +331,17 @@ class RepoStore(
 
     /**
      * Откуда взять текст файла с данным blob-SHA, от дешёвого к дорогому: он уже лежит по этому
-     * пути; он лежит по другому пути (Action переименовал файл — blob тот же, читать нечего); путь
-     * ждёт отправки, и его запись в кэше — база слияния, перечитывать её нельзя (решение LLD-1).
-     * Только если не подошло ничего — `git/blobs`.
+     * пути; он лежит по другому пути (Action переименовал файл — blob тот же, читать нечего). Иначе
+     * читаем `git/blobs`. Базы ожидающих правок подставляются только в saveRefreshed под замком
+     * очереди: правка может появиться и быть отменена во время этих сетевых чтений.
      */
     private fun texts(
         api: GithubApi,
         was: RepoCache.Snapshot,
     ): (String, String) -> RepoCache.Entry {
-        val waiting = queue.pending().map { it.path }.toSet()
         val bySha = was.files.values.associateBy { it.sha }
         return { path, sha ->
-            was.files[path]?.takeIf { it.sha == sha || path in waiting }
+            was.files[path]?.takeIf { it.sha == sha }
                 ?: bySha[sha]
                 ?: RepoCache.Entry(sha, api.readBlob(sha))
         }

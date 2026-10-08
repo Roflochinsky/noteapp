@@ -17,7 +17,7 @@ object CommunicationExport {
         transcript: (String) -> String,
         exportedAt: String = LocalDateTime.now().toString(),
         pendingPaths: Set<String> = emptySet(),
-        sync: SyncStatus = SyncStatus.NO_TOKEN,
+        sync: SyncStatus? = null,
     ): String = buildString {
         append("# Контекст коммуникаций\n\n")
         append("Проект: ${project ?: "Все проекты"}\nВыгружено: $exportedAt\n\n")
@@ -28,7 +28,7 @@ object CommunicationExport {
             "Пустые поля не означают отсутствие договорённостей. Автоматической передачи помощнику нет.\n\n"
         )
         append(
-            "Состояние синхронизации: $sync. Свежесть ограничена последним обновлением на устройстве.\n\n"
+            "Состояние синхронизации: ${syncLabel(sync)}. Свежесть ограничена последним обновлением на устройстве.\n\n"
         )
         sources.filter { project == null || it.project == project }.forEach { source(it) }
         notes
@@ -38,6 +38,16 @@ object CommunicationExport {
         if (selectedTasks.isNotEmpty()) append("## Задачи из локального снимка репозитория\n\n")
         selectedTasks.forEach { task(it, pendingPaths) }
     }
+
+    private fun syncLabel(sync: SyncStatus?): String =
+        when (sync) {
+            SyncStatus.OK -> "последняя проверка без ошибок"
+            SyncStatus.NO_TOKEN -> "GitHub не подключён"
+            SyncStatus.OFFLINE -> "нет связи с GitHub"
+            SyncStatus.NO_ACCESS -> "нет доступа к репозиторию"
+            SyncStatus.RATE_LIMIT -> "лимит запросов GitHub"
+            null -> "не проверено или обновление ещё идёт"
+        }
 
     private fun StringBuilder.source(source: Communication) {
         append("## ${source.title}\n\nИсточник: ${source.source}\n")

@@ -29,6 +29,9 @@ class CommunicationController(
 
     var incoming by mutableStateOf<Communication?>(null)
     var error by mutableStateOf<String?>(null)
+    var notice by mutableStateOf<String?>(null)
+        private set
+
     var busy by mutableStateOf(false)
         private set
 
@@ -58,7 +61,7 @@ class CommunicationController(
                             file.inputStream().use { it.copyTo(output) }
                         } ?: error("Не удалось сохранить файл")
                     }
-                    error = "Копия контекста сохранена в выбранном месте."
+                    notice = "Копия контекста сохранена в выбранном месте."
                 }
         }
 
@@ -161,6 +164,7 @@ class CommunicationController(
             mutex.lock()
             busy = true
             error = null
+            notice = null
             try {
                 action()
             } catch (cancelled: CancellationException) {

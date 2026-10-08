@@ -20,7 +20,7 @@ class CommunicationExportTest {
                 sync = SyncStatus.OFFLINE,
             )
         assertEquals(2, Regex("ещё не подтверждены GitHub").findAll(export).count())
-        assertTrue(export.contains("OFFLINE"))
+        assertTrue(export.contains("нет связи с GitHub"))
     }
 
     @Test

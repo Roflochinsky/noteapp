@@ -156,6 +156,7 @@ class MainActivity : ComponentActivity() {
                     incoming = communicationController.incoming,
                     error = communicationController.error,
                     busy = communicationController.busy,
+                    notice = communicationController.notice,
                     onBack = { screen = Screen.Feed() },
                     onImport = communicationController::importFile,
                     onIncomingConsumed = { communicationController.incoming = null },
@@ -182,10 +183,7 @@ class MainActivity : ComponentActivity() {
                             onRefresh = { scope.launch { refreshRepo() } },
                             onRecord = ::onRecord,
                             onSettings = { screen = Screen.Onboarding },
-                            onCommunications = {
-                                communicationController.error = null
-                                screen = Screen.Communications
-                            },
+                            onCommunications = { screen = Screen.Communications },
                         )
                     Tab.TASKS -> {
                         BackHandler { screen = Screen.Feed(Tab.NOTES) }
@@ -437,7 +435,7 @@ class MainActivity : ComponentActivity() {
         val localNotes = feed()
         val localTasks = tasks
         val pending = pendingPaths
-        val state = sync
+        val state = sync.takeUnless { refreshing }
         communicationController.export(share) {
             CommunicationExport.build(
                 project,
