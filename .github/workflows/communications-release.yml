@@ -1,0 +1,11 @@
+name: Communications release
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pending-review:
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Release remains disabled until independent review and final gates pass.'
