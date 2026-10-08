@@ -1,6 +1,7 @@
 package com.roflochinsky.noteapp.pipeline
 
 import java.io.IOException
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -72,6 +73,12 @@ class GithubClientTest {
         assertFalse(tree.toString(), tree.containsKey("tasks"))
         assertFalse(tree.toString(), tree.containsKey("встречи"))
         assertTrue(tree.toString(), tree.keys.all { it.endsWith(".md") })
+    }
+
+    @Test(expected = IOException::class)
+    fun `усечённое дерево не выдаётся за полный снимок репо`() {
+        val truncated = JSONObject(fixture("trees-recursive")).put("truncated", true).toString()
+        client { truncated }.readTree(commit)
     }
 
     /**

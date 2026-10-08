@@ -14,8 +14,8 @@ android {
     applicationId = "com.roflochinsky.noteapp"
     minSdk = 34
     targetSdk = 35
-    versionCode = 2
-    versionName = "1.0"
+    versionCode = 3
+    versionName = "1.1"
   }
 
   signingConfigs {
@@ -31,6 +31,10 @@ android {
   }
 
   buildTypes {
+    debug {
+      applicationIdSuffix = ".communications"
+      versionNameSuffix = "-preview"
+    }
     release {
       // Без NOTEAPP_* (чужая машина/CI) — debug-подпись, чтобы сборка не падала.
       signingConfig =

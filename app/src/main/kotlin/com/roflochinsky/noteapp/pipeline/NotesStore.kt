@@ -2,6 +2,7 @@ package com.roflochinsky.noteapp.pipeline
 
 import android.content.Context
 import java.io.File
+import java.io.IOException
 
 /**
  * Хранилище заметок: files/notes/<id>/ (id = ГГГГММДД-ЧЧММСС). Статус заметки — наличие файлов,
@@ -46,7 +47,7 @@ object NotesStore {
                     id = dir.name,
                     hasAudio = File(dir, AUDIO).exists(),
                     transcribed = md.exists(),
-                    pushed = File(dir, PUSHED).exists(),
+                    pushed = pushedPath(dir) != null,
                     durationSec = durationSec(dir),
                     title = lines.firstOrNull()?.let(::stripCue)?.take(TITLE_MAX) ?: "",
                     preview = lines.take(2).joinToString("\n"),
@@ -62,16 +63,17 @@ object NotesStore {
      * `transcript.md`, а он навсегда выключает перераспознавание ([TranscribeWorker] при
      * существующем файле выходит `success`) и молча уезжает в репо заметок куском разговора.
      *
-     * Фолбэк на прямую запись — на случай, когда `renameTo` не удался (образец `RepoCache`): это
-     * хуже атомарного переезда, но лучше потерянного файла.
+     * Если атомарная замена не удалась, бросаем IOException: воркер повторит её позже. Прямая
+     * перезапись назначения нарушила бы гарантию и могла оставить обрезанный транскрипт.
      */
+    @Synchronized
     fun writeAtomic(file: File, text: String) {
         val tmp = File(file.parentFile, file.name + TMP)
-        tmp.writeText(text)
-        if (!tmp.renameTo(file)) {
-            file.writeText(tmp.readText())
-            tmp.delete()
+        tmp.outputStream().use {
+            it.write(text.toByteArray(Charsets.UTF_8))
+            it.fd.sync()
         }
+        if (!tmp.renameTo(file)) throw IOException("Не удалось атомарно сохранить ${file.name}")
     }
 
     /**
@@ -83,6 +85,10 @@ object NotesStore {
      *   которая встала с известной бедой, от той, что просто идёт (у идущей заливки причины нет).
      */
     fun clearStatus(dir: File): Boolean = File(dir, STATUS).delete()
+
+    /** An interrupted legacy write could leave an empty marker; that is not delivery proof. */
+    fun pushedPath(dir: File): String? =
+        File(dir, PUSHED).takeIf { it.isFile }?.readText()?.trim()?.takeIf(NoteRef::isNote)
 
     /** duration.txt, а для старых заметок — ленивая миграция из метаданных аудио. */
     private fun durationSec(dir: File): Long {

@@ -10,6 +10,7 @@ import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONException
 
 /**
  * Расшифровка одной заметки. Контент ходит через файлы NotesStore, в Data — только noteId (лимит
@@ -96,18 +97,51 @@ class TranscribeWorker(context: Context, params: WorkerParameters) :
             key: String?,
             stt: (File, String) -> String,
         ): WorkResult {
-            val audio = File(dir, NotesStore.AUDIO)
-            return when {
-                !audio.exists() -> WorkResult.failure()
-                File(dir, NotesStore.TRANSCRIPT_MD).exists() -> WorkResult.success()
-                key == null -> {
-                    Log.w(Probe.LOG_TAG, "PROBE:STT_SKIP no_key note=$noteId")
-                    reason(dir, NO_KEY)
-                    WorkResult.retry()
+            return try {
+                val audio = File(dir, NotesStore.AUDIO)
+                when {
+                    File(dir, NotesStore.TRANSCRIPT_MD).exists() -> WorkResult.success()
+                    restoreTranscript(dir) -> WorkResult.success()
+                    EmptyTranscription.stopped(dir) -> WorkResult.failure()
+                    !audio.exists() -> WorkResult.failure()
+                    key == null -> {
+                        Log.w(Probe.LOG_TAG, "PROBE:STT_SKIP no_key note=$noteId")
+                        reason(dir, NO_KEY)
+                        WorkResult.retry()
+                    }
+                    else -> recognize(audio, dir, noteId, key, stt)
                 }
-                else -> recognize(audio, dir, noteId, key, stt)
+            } catch (_: IOException) {
+                WorkResult.retry()
             }
         }
+
+        /** A process may stop between saving the paid response and its Markdown projection. */
+        private fun restoreTranscript(dir: File): Boolean {
+            val response = File(dir, NotesStore.TRANSCRIPT_JSON)
+            if (!response.exists()) return false
+            val md =
+                try {
+                    val json = response.readText()
+                    TranscriptMapper.toMarkdown(
+                        if (org.json.JSONObject(json).has("results"))
+                            TranscriptMapper.fromDeepgramJson(json)
+                        else TranscriptMapper.fromElevenLabsJson(json)
+                    )
+                } catch (_: JSONException) {
+                    ""
+                }
+            return if (md.isBlank()) {
+                false
+            } else {
+                NotesStore.writeAtomic(File(dir, NotesStore.TRANSCRIPT_MD), md)
+                clearReason(dir)
+                true
+            }
+        }
+
+        /** Explicit retries after a completed empty response are one-use, not automatic. */
+        fun requestRetry(dir: File) = EmptyTranscription.request(dir)
 
         private fun recognize(
             audio: File,
@@ -117,6 +151,7 @@ class TranscribeWorker(context: Context, params: WorkerParameters) :
             stt: (File, String) -> String,
         ): WorkResult =
             try {
+                EmptyTranscription.consume(dir)
                 val json = stt(audio, key)
                 // Ответ вендора кладётся целиком: его читают будущие срезы (прокрут по словам).
                 NotesStore.writeAtomic(File(dir, NotesStore.TRANSCRIPT_JSON), json)
@@ -126,7 +161,8 @@ class TranscribeWorker(context: Context, params: WorkerParameters) :
                     // Слов в ответе нет. Пустой `transcript.md` был бы приговором: заметка
                     // навсегда считалась бы расшифрованной, и пустой транскрипт уехал бы в репо.
                     Log.w(Probe.LOG_TAG, "PROBE:STT_EMPTY note=$noteId")
-                    WorkResult.retry()
+                    reason(dir, EmptyTranscription.REASON)
+                    WorkResult.failure()
                 } else {
                     NotesStore.writeAtomic(File(dir, NotesStore.TRANSCRIPT_MD), md)
                     Log.i(Probe.LOG_TAG, "PROBE:STT_OK note=$noteId chars=${md.length}")
@@ -144,6 +180,9 @@ class TranscribeWorker(context: Context, params: WorkerParameters) :
             } catch (e: IOException) {
                 Log.w(Probe.LOG_TAG, "PROBE:STT_RETRY note=$noteId ${e.message?.take(ERR_PREVIEW)}")
                 clearReason(dir)
+                WorkResult.retry()
+            } catch (_: JSONException) {
+                reason(dir, "некорректный ответ ElevenLabs — повторю позже")
                 WorkResult.retry()
             }
 

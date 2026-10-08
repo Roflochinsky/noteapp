@@ -30,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import androidx.work.WorkManager
+import com.roflochinsky.noteapp.pipeline.CommunicationExport
 import com.roflochinsky.noteapp.pipeline.GithubClient
 import com.roflochinsky.noteapp.pipeline.NoteFile
 import com.roflochinsky.noteapp.pipeline.NoteRef
@@ -40,6 +41,7 @@ import com.roflochinsky.noteapp.pipeline.RepoWriteWorker
 import com.roflochinsky.noteapp.pipeline.Settings
 import com.roflochinsky.noteapp.pipeline.SyncStatus
 import com.roflochinsky.noteapp.pipeline.TaskFile
+import com.roflochinsky.noteapp.ui.CommunicationsScreen
 import com.roflochinsky.noteapp.ui.DetailScreen
 import com.roflochinsky.noteapp.ui.DocTheme
 import com.roflochinsky.noteapp.ui.FeedScreen
@@ -51,6 +53,7 @@ import com.roflochinsky.noteapp.ui.Tab
 import com.roflochinsky.noteapp.ui.TaskDetailScreen
 import com.roflochinsky.noteapp.ui.TaskFilter
 import com.roflochinsky.noteapp.ui.TasksScreen
+import java.io.File
 import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -62,6 +65,8 @@ class MainActivity : ComponentActivity() {
 
     private sealed interface Screen {
         data object Onboarding : Screen
+
+        data object Communications : Screen
 
         /** Вкладка — часть состояния экрана: Back с «Задач» возвращает на «Заметки». */
         data class Feed(val tab: Tab = Tab.NOTES) : Screen
@@ -96,6 +101,10 @@ class MainActivity : ComponentActivity() {
     private var permTick by mutableIntStateOf(0)
     private var repoStore: RepoStore? = null
 
+    internal val communicationController by lazy {
+        CommunicationController(this) { screen = Screen.Communications }
+    }
+
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
             permTick++
@@ -106,6 +115,8 @@ class MainActivity : ComponentActivity() {
         androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
             .isAppearanceLightStatusBars = true
         if (!setupComplete()) screen = Screen.Onboarding
+        if (savedInstanceState?.getBoolean("communications") == true) screen = Screen.Communications
+        communicationController.restore(savedInstanceState, intent)
         setContent {
             DocTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -138,6 +149,20 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(Unit) { refreshRepo() }
         when (val s = screen) {
             is Screen.Onboarding -> OnboardingScreen(steps = steps()) { screen = Screen.Feed() }
+            is Screen.Communications ->
+                CommunicationsScreen(
+                    sources = communicationController.sources,
+                    projects = projects() + repoNotes.mapNotNull { it.project },
+                    incoming = communicationController.incoming,
+                    error = communicationController.error,
+                    busy = communicationController.busy,
+                    onBack = { screen = Screen.Feed() },
+                    onImport = communicationController::importFile,
+                    onIncomingConsumed = { communicationController.incoming = null },
+                    onSave = communicationController::save,
+                    onExport = ::exportCommunications,
+                    onTasks = { screen = Screen.Feed(Tab.TASKS) },
+                )
             is Screen.Feed ->
                 when (s.tab) {
                     Tab.NOTES ->
@@ -157,6 +182,10 @@ class MainActivity : ComponentActivity() {
                             onRefresh = { scope.launch { refreshRepo() } },
                             onRecord = ::onRecord,
                             onSettings = { screen = Screen.Onboarding },
+                            onCommunications = {
+                                communicationController.error = null
+                                screen = Screen.Communications
+                            },
                         )
                     Tab.TASKS -> {
                         BackHandler { screen = Screen.Feed(Tab.NOTES) }
@@ -205,7 +234,26 @@ class MainActivity : ComponentActivity() {
                         onOpen = ::openInGithub,
                         onTask = { screen = Screen.Task(it) },
                         onRetry = {
-                            item.noteId?.let { PipelineQueue.enqueue(this@MainActivity, it) }
+                            item.noteId?.let { id ->
+                                scope.launch {
+                                    try {
+                                        withContext(Dispatchers.IO) {
+                                            com.roflochinsky.noteapp.pipeline.TranscribeWorker
+                                                .requestRetry(
+                                                    NotesStore.noteDir(this@MainActivity, id)
+                                                )
+                                        }
+                                        PipelineQueue.enqueue(this@MainActivity, id)
+                                    } catch (_: java.io.IOException) {
+                                        android.widget.Toast.makeText(
+                                                this@MainActivity,
+                                                "Не удалось начать повтор. Проверьте свободное место.",
+                                                android.widget.Toast.LENGTH_LONG,
+                                            )
+                                            .show()
+                                    }
+                                }
+                            }
                         },
                         onBack = back,
                     )
@@ -255,7 +303,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        if (screen is Screen.Onboarding && setupComplete()) {
+        if (screen is Screen.Onboarding) {
             BackHandler { screen = Screen.Feed() }
         }
         if (sheetOpen && recording) {
@@ -277,6 +325,7 @@ class MainActivity : ComponentActivity() {
             "github" ->
                 InputDialog("GitHub-токен (репо заметок)") {
                     Settings.setGithubToken(this@MainActivity, it)
+                    enqueueWaiting(this@MainActivity, transcribed = true)
                 }
         }
     }
@@ -306,8 +355,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun write(scope: kotlinx.coroutines.CoroutineScope, action: (RepoStore) -> Unit) {
-        after(scope, action)
-        RepoWriteWorker.schedule(this)
+        val store = repoStore ?: return
+        scope.launch {
+            withContext(Dispatchers.IO) { action(store) }
+            // Only schedule after the operation is durable: an early worker can otherwise
+            // observe an empty queue and finish before the edit is written.
+            RepoWriteWorker.schedule(this@MainActivity)
+            reload()
+        }
     }
 
     private fun after(scope: kotlinx.coroutines.CoroutineScope, action: (RepoStore) -> Unit) {
@@ -365,9 +420,52 @@ class MainActivity : ComponentActivity() {
         runCatching { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))) }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        communicationController.receive(intent)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("communications", screen is Screen.Communications)
+        communicationController.saveState(outState)
+        super.onSaveInstanceState(outState)
+    }
+
+    private fun exportCommunications(project: String?, share: Boolean) {
+        val localSources = communicationController.sources
+        val localNotes = feed()
+        val localTasks = tasks
+        val pending = pendingPaths
+        val state = sync
+        communicationController.export(share) {
+            CommunicationExport.build(
+                project,
+                localSources,
+                localNotes,
+                localTasks,
+                transcript = { id ->
+                    File(NotesStore.noteDir(this@MainActivity, id), NotesStore.TRANSCRIPT_MD)
+                        .takeIf { it.isFile }
+                        ?.readText()
+                        .orEmpty()
+                },
+                pendingPaths = pending,
+                sync = state,
+            )
+        }
+    }
+
     private fun onRecord() {
         if (recording) sheetOpen = true
-        else startForegroundService(RecordingService.toggleIntent(this))
+        else if (
+            checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+                PackageManager.PERMISSION_GRANTED
+        ) {
+            permissionLauncher.launch(
+                arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS)
+            )
+        } else startForegroundService(RecordingService.toggleIntent(this))
     }
 
     /**
@@ -434,6 +532,8 @@ class MainActivity : ComponentActivity() {
                     value = input,
                     onValueChange = { input = it },
                     singleLine = true,
+                    visualTransformation =
+                        androidx.compose.ui.text.input.PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
                 )
             },
@@ -553,9 +653,10 @@ class MainActivity : ComponentActivity() {
             cancel: (String) -> Unit = {
                 WorkManager.getInstance(context).cancelUniqueWork(PipelineQueue.NOTE_PREFIX + it)
             },
+            transcribed: Boolean = false,
         ) =
             NotesStore.list(context)
-                .filterNot { it.transcribed }
+                .filter { it.transcribed == transcribed && !it.pushed }
                 .map { it.id }
                 .forEach { id ->
                     if (NotesStore.clearStatus(NotesStore.noteDir(context, id))) {

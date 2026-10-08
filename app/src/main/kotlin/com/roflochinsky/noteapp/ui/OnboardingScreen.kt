@@ -39,9 +39,10 @@ fun OnboardingScreen(steps: List<OnboardStep>, onContinue: () -> Unit) {
             .padding(26.dp, 20.dp)
             .navigationBarsPadding()
     ) {
-        Text("Одна кнопка — и мысль уже в GitHub", style = MaterialTheme.typography.headlineSmall)
+        Text("Записи и коммуникации под рукой", style = MaterialTheme.typography.headlineSmall)
         Text(
-            "Несколько шагов, и телефон пишет по долгому нажатию питания.",
+            "Тексты доступны без настройки. Для записи нужен микрофон; распознавание, " +
+                "GitHub и кнопка питания настраиваются отдельно.",
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(top = 6.dp),
         )
@@ -55,9 +56,9 @@ fun OnboardingScreen(steps: List<OnboardStep>, onContinue: () -> Unit) {
             modifier = Modifier.fillMaxWidth().height(52.dp),
             shape = RoundedCornerShape(14.dp),
             colors = ButtonDefaults.buttonColors(containerColor = DocPalette.Nav),
-            enabled = steps.all { it.done },
+            enabled = true,
         ) {
-            Text(if (steps.all { it.done }) "Продолжить" else "Заверши шаги выше")
+            Text(if (steps.all { it.done }) "Продолжить" else "Продолжить без настройки")
         }
     }
 }

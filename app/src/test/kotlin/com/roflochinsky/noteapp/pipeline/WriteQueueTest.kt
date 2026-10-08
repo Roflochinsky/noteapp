@@ -24,6 +24,30 @@ class WriteQueueTest {
     private val races = 300
 
     @Test
+    fun `failed delete enqueue preserves earlier queued edits`() {
+        val dir = tmp.newFolder()
+        val q = queue(dir)
+        val previous = q.enqueue(path, Edit.SetField("priority", "P1"))
+        java.io.File(dir, "000002.json.tmp").mkdir()
+        org.junit.Assert.assertThrows(java.io.IOException::class.java) {
+            q.enqueue(path, Edit.DeleteFile)
+        }
+        assertEquals(listOf(previous), q.pending())
+    }
+
+    @Test
+    fun `failed replacement keeps previous operation intact`() {
+        val dir = tmp.newFolder()
+        val q = queue(dir)
+        val previous = q.enqueue(path, Edit.SetField("priority", "P1"))
+        java.io.File(dir, "${previous.id}.json.tmp").mkdir()
+        org.junit.Assert.assertThrows(java.io.IOException::class.java) {
+            q.enqueue(path, Edit.SetField("priority", "P2"))
+        }
+        assertEquals(listOf(previous), q.pending())
+    }
+
+    @Test
     fun `два быстрых тапа по одному полю дают одну операцию`() {
         val q = queue(tmp.newFolder())
         q.enqueue(path, Edit.SetStatus(TaskFile.STATUS_DONE, LocalDate.parse("2026-08-26")))
@@ -42,6 +66,25 @@ class WriteQueueTest {
             listOf(Edit.SetField("priority", "P1"), Edit.SetField("due", "2026-08-28")),
             q.pending().map { it.edit },
         )
+    }
+
+    @Test
+    fun `галочка на новой подзадаче не вытесняет её добавление`() {
+        val q = queue(tmp.newFolder())
+        q.enqueue(path, Edit.AddSubtask("Новая подзадача"))
+        q.enqueue(path, Edit.ToggleSubtask("Новая подзадача", true))
+        assertEquals(
+            listOf(Edit.AddSubtask("Новая подзадача"), Edit.ToggleSubtask("Новая подзадача", true)),
+            q.pending().map { it.edit },
+        )
+    }
+
+    @Test
+    fun `два добавления одинаковой подзадачи склеиваются`() {
+        val q = queue(tmp.newFolder())
+        q.enqueue(path, Edit.AddSubtask("Новая подзадача"))
+        q.enqueue(path, Edit.AddSubtask("НОВАЯ  подзадача"))
+        assertEquals(listOf(Edit.AddSubtask("НОВАЯ  подзадача")), q.pending().map { it.edit })
     }
 
     @Test

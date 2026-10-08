@@ -144,4 +144,24 @@ class MainActivityTest {
         Settings.setElevenLabsKey(context, "xi-kluch")
         assertTrue(MainActivity.setupComplete(context))
     }
+
+    @Test
+    fun `GitHub token resumes only transcribed undelivered notes`() {
+        record("20261004-120000", transcribed = true, status = "нет GitHub-токена")
+        record("20261004-120100", transcribed = false)
+        record("20261004-120200", transcribed = true)
+        File(NotesStore.noteDir(context, "20261004-120200"), NotesStore.PUSHED)
+            .writeText("inbox/2026-10-04-1202.md")
+        val log = mutableListOf<String>()
+        MainActivity.enqueueWaiting(
+            context,
+            enqueue = { log += "enqueue $it" },
+            cancel = { log += "cancel $it" },
+            transcribed = true,
+        )
+        assertEquals(listOf("cancel 20261004-120000", "enqueue 20261004-120000"), log)
+        assertFalse(
+            File(NotesStore.noteDir(context, "20261004-120000"), NotesStore.STATUS).exists()
+        )
+    }
 }

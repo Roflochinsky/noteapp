@@ -260,15 +260,24 @@ class TranscribeWorkerTest {
     /**
      * Вендор ответил, но слов в ответе нет. Пустой `transcript.md` был бы приговором: воркер при
      * существующем файле выходит `success` и заметку больше никогда не перераспознаёт, а в репо
-     * заметок уехал бы пустой транскрипт. Причина при этом не пишется: слов на экране для неё
-     * ведущий не назначил, и запись честно остаётся в общей очереди.
+     * заметок уехал бы пустой транскрипт. Автоматический повтор завершённого пустого ответа тратил
+     * бы деньги снова и снова; теперь он останавливается с видимой причиной.
      */
     @Test
     fun `пустой ответ вендора не выдаётся за расшифровку`() {
         val dir = noteDir()
         val result = run(dir) { _, _ -> """{"language_code":"rus","text":"","words":[]}""" }
-        assertEquals(ListenableWorker.Result.retry(), result)
+        assertEquals(ListenableWorker.Result.failure(), result)
         assertFalse(File(dir, NotesStore.TRANSCRIPT_MD).exists())
+        assertTrue(File(dir, NotesStore.STATUS).readText().contains("нет реплик"))
+        assertTrue(File(dir, NotesStore.AUDIO).exists())
+        repeat(3) { assertEquals(ListenableWorker.Result.failure(), run(dir)) }
+        assertEquals(1, calls)
+        TranscribeWorker.requestRetry(dir)
+        assertEquals(ListenableWorker.Result.success(), run(dir))
+        assertEquals(2, calls)
+        assertEquals(ListenableWorker.Result.success(), run(dir))
+        assertEquals(2, calls)
     }
 
     /**
@@ -319,6 +328,54 @@ class TranscribeWorkerTest {
 
         assertEquals("читатель увидел кусок файла: ${torn.get()}", null, torn.get())
         assertEquals(whole, file.readText())
+    }
+
+    @Test
+    fun `empty response explicit retry survives missing key until actual attempt`() {
+        val dir = noteDir()
+        File(dir, NotesStore.TRANSCRIPT_JSON).writeText("""{"words":[]}""")
+        TranscribeWorker.requestRetry(dir)
+        assertEquals(ListenableWorker.Result.retry(), run(dir, key = null))
+        assertEquals(0, calls)
+        assertEquals(ListenableWorker.Result.success(), run(dir))
+        assertEquals(1, calls)
+    }
+
+    @Test
+    fun `legacy Deepgram saved response restores without paid request or audio`() {
+        val dir = noteDir(withAudio = false)
+        File(dir, NotesStore.TRANSCRIPT_JSON)
+            .writeText(
+                """{"results":{"utterances":[{"speaker":0,"start":1.0,"transcript":"Legacy source"}]}}"""
+            )
+        assertEquals(ListenableWorker.Result.success(), run(dir, key = null))
+        assertEquals(0, calls)
+        assertTrue(File(dir, NotesStore.TRANSCRIPT_MD).readText().contains("Legacy source"))
+    }
+
+    @Test
+    fun `saved vendor response resumes locally without a second paid request`() {
+        val dir = noteDir()
+        File(dir, NotesStore.TRANSCRIPT_JSON).writeText(sample)
+        assertEquals(ListenableWorker.Result.success(), run(dir, key = null))
+        assertEquals(0, calls)
+        assertTrue(File(dir, NotesStore.TRANSCRIPT_MD).readText().contains("Собрали новый релиз"))
+    }
+
+    @Test
+    fun `malformed response remains retryable rather than permanently failing chain`() {
+        val dir = noteDir()
+        assertEquals(ListenableWorker.Result.retry(), run(dir) { _, _ -> "{truncated" })
+        assertFalse(File(dir, NotesStore.TRANSCRIPT_MD).exists())
+        assertEquals(ListenableWorker.Result.success(), run(dir))
+        assertEquals(2, calls)
+    }
+
+    @Test
+    fun `valid transcript continues to push even when audio is absent`() {
+        val dir = noteDir(transcribed = true, withAudio = false)
+        assertEquals(ListenableWorker.Result.success(), run(dir, key = null))
+        assertEquals(0, calls)
     }
 
     private companion object {
