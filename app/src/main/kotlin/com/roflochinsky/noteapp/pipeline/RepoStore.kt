@@ -3,6 +3,7 @@ package com.roflochinsky.noteapp.pipeline
 import java.io.File
 import java.io.IOException
 import java.time.LocalDate
+import org.json.JSONException
 
 /** Что показать под шапкой одной строкой (без диалогов и тостов). */
 enum class SyncStatus {
@@ -236,6 +237,7 @@ class RepoStore(
         val api = api ?: return SyncStatus.NO_TOKEN
         return try {
             val was = snapshot
+            val hadPending = queue.pending().isNotEmpty()
             // Ручное обновление спрашивает безусловно — это РЕШЕНИЕ среза Н7, а не обход
             // технического незнания: владелец, дёрнувший экран вниз, обязан получить свежее
             // состояние, а не «у нас записано, что не менялось». Прежняя формулировка ссылалась
@@ -254,7 +256,7 @@ class RepoStore(
                         was.commitSha.takeIf { it.isNotEmpty() }?.let { delta(api, it, ref.sha) }
                     val files =
                         if (delta == null) rebuilt(api, ref.sha, was) else applied(api, delta, was)
-                    cache.save(RepoCache.Snapshot(ref.sha, files, ref.etag.orEmpty()))
+                    saveRefreshed(was, ref, files, hadPending)
                 }
             }
             SyncStatus.OK
@@ -267,6 +269,28 @@ class RepoStore(
             SyncStatus.OFFLINE
         }
     }
+
+    /** Сеть уже закончилась: повторно проверяем очередь перед заменой баз слияния. */
+    private fun saveRefreshed(
+        was: RepoCache.Snapshot,
+        ref: Ref,
+        files: Map<String, RepoCache.Entry>,
+        hadPending: Boolean,
+    ) =
+        synchronized(queue) {
+            val waiting = queue.pending().map { it.path }.toSet()
+            // Правка могла появиться во время медленного чтения блоба. Сохраняем базу,
+            // которую видел владелец; иначе новый SHA обошёл бы проверку конфликта на PUT.
+            val bases = was.files.filterKeys { it in waiting && it in files }
+            val visible = files + bases
+            val complete = !hadPending && waiting.isEmpty()
+            // Неполный снимок не получает новый ETag: после отмены правки его надо дочитать.
+            // Замок журнала держится только через локальную запись, никогда через сеть.
+            cache.save(
+                if (complete) RepoCache.Snapshot(ref.sha, visible, ref.etag.orEmpty())
+                else was.copy(files = visible)
+            )
+        }
 
     /**
      * Что изменилось с прошлого раза — один запрос вместо всего дерева (research §6.C). `null`
@@ -307,18 +331,17 @@ class RepoStore(
 
     /**
      * Откуда взять текст файла с данным blob-SHA, от дешёвого к дорогому: он уже лежит по этому
-     * пути; он лежит по другому пути (Action переименовал файл — blob тот же, читать нечего); путь
-     * ждёт отправки, и его запись в кэше — база слияния, перечитывать её нельзя (решение LLD-1).
-     * Только если не подошло ничего — `git/blobs`.
+     * пути; он лежит по другому пути (Action переименовал файл — blob тот же, читать нечего). Иначе
+     * читаем `git/blobs`. Базы ожидающих правок подставляются только в saveRefreshed под замком
+     * очереди: правка может появиться и быть отменена во время этих сетевых чтений.
      */
     private fun texts(
         api: GithubApi,
         was: RepoCache.Snapshot,
     ): (String, String) -> RepoCache.Entry {
-        val waiting = queue.pending().map { it.path }.toSet()
         val bySha = was.files.values.associateBy { it.sha }
         return { path, sha ->
-            was.files[path]?.takeIf { it.sha == sha || path in waiting }
+            was.files[path]?.takeIf { it.sha == sha }
                 ?: bySha[sha]
                 ?: RepoCache.Entry(sha, api.readBlob(sha))
         }
@@ -342,6 +365,13 @@ class RepoStore(
         flying = op.id
         return try {
             deliver(op)
+        } catch (@Suppress("SwallowedException") e: IOException) {
+            // Включая повторное чтение после 409/422: исключения из catch в deliver
+            // соседним catch не перехватываются, а операция должна остаться в очереди.
+            Push.RETRY
+        } catch (@Suppress("SwallowedException") e: JSONException) {
+            // Сервер мог принять PUT, но оборвать JSON-ответ. Повтор сверит результат.
+            Push.RETRY
         } finally {
             flying = null
         }
@@ -358,8 +388,6 @@ class RepoStore(
             }
         } catch (e: GithubHttpException) {
             http(api, op, e)
-        } catch (@Suppress("SwallowedException") e: IOException) {
-            Push.RETRY
         }
     }
 
@@ -373,13 +401,13 @@ class RepoStore(
         val entry = snapshot.files[op.path] ?: api.readFile(op.path)
         val content = Edit.apply(entry.text, op.edit)
         val written = api.putFile(op.path, content, message(op), entry.sha)
-        accept(op.path, RepoCache.Entry(written.sha ?: entry.sha, content), written.commitSha)
+        accept(op.path, RepoCache.Entry(written.sha ?: entry.sha, content))
         return drop(op)
     }
 
     private fun born(api: GithubApi, op: WriteQueue.Op, edit: Edit.CreateTask): Push {
         val written = api.putFile(op.path, edit.content, message(op), null)
-        accept(op.path, RepoCache.Entry(written.sha.orEmpty(), edit.content), written.commitSha)
+        accept(op.path, RepoCache.Entry(written.sha.orEmpty(), edit.content))
         return drop(op)
     }
 
@@ -398,7 +426,7 @@ class RepoStore(
         val text = Registry.add(entry.text, edit.name) ?: return drop(op)
         return try {
             val written = api.putFile(op.path, text, message(op), entry.sha)
-            accept(op.path, RepoCache.Entry(written.sha ?: entry.sha, text), written.commitSha)
+            accept(op.path, RepoCache.Entry(written.sha ?: entry.sha, text))
             drop(op)
         } catch (e: GithubHttpException) {
             if (e.code != HTTP_CONFLICT) throw e
@@ -412,7 +440,7 @@ class RepoStore(
      * имя в чипе и считает, что оно записано.
      */
     private fun replay(api: GithubApi, op: WriteQueue.Op, edit: Edit.AddToRegistry): Push {
-        accept(op.path, api.readFile(op.path), commitSha = "")
+        accept(op.path, api.readFile(op.path), resetRevision = true)
         if (op.attempt < ConflictRule.MAX_REPLAYS) {
             queue.retry(op)
             return Push.MORE
@@ -423,8 +451,8 @@ class RepoStore(
 
     private fun gone(api: GithubApi, op: WriteQueue.Op): Push {
         val sha = snapshot.files[op.path]?.sha ?: api.readFile(op.path).sha
-        val written = api.deleteFile(op.path, message(op), sha)
-        forget(op.path, written.commitSha)
+        api.deleteFile(op.path, message(op), sha)
+        forget(op.path)
         return drop(op)
     }
 
@@ -435,16 +463,23 @@ class RepoStore(
         // Кэш базу потерял — считаем базой то, что сейчас в git: правка ляжет поверх, а не
         // пропадёт.
         val base = snapshot.files[op.path] ?: theirs
+        val mine = Edit.apply(base.text, op.edit)
+        // PUT доехал, а ответ потерялся: цель уже достигнута. В частности, повтор AddSubtask
+        // поверх такого текста создал бы второй одинаковый чекбокс.
+        if (op.edit != Edit.DeleteFile && mine == theirs.text) {
+            accept(op.path, theirs, resetRevision = true)
+            return drop(op)
+        }
         val outcome =
             ConflictRule.resolve(
                 base = TaskFile.parse(op.path, base.text),
-                mine = TaskFile.parse(op.path, Edit.apply(base.text, op.edit)),
+                mine = TaskFile.parse(op.path, mine),
                 theirs = TaskFile.parse(op.path, theirs.text),
             )
         // Чужой текст приехал из коммита, которого мы не знаем: `readFile` его не называет.
-        // Оставить прежний sha — соврать («коммит, на котором мы синхронизированы», KDoc
-        // RepoCache): этого текста тот коммит не содержит. Пустой sha и значит «не знаем».
-        accept(op.path, theirs, commitSha = "")
+        // Здесь переустанавливается база слияния: следующий полный снимок сверяем деревом,
+        // не условным ответом со старым ETag. Пустой sha и значит «нужно пересобрать».
+        accept(op.path, theirs, resetRevision = true)
         return when (outcome) {
             is ConflictRule.Divergence -> diverged(op, outcome.fields)
             // Правки не пересеклись: переигрываем ту же Edit поверх свежего текста.
@@ -458,11 +493,10 @@ class RepoStore(
     private fun http(api: GithubApi, op: WriteQueue.Op, e: GithubHttpException): Push =
         when (e.code) {
             HTTP_CONFLICT -> conflict(api, op)
-            HTTP_NOT_FOUND -> vanished(op)
+            HTTP_NOT_FOUND -> missing(api, op)
             HTTP_UNPROCESSABLE ->
                 if (op.edit is Edit.CreateTask) {
-                    say("Файл ${op.path} уже есть в GitHub — задача не создана")
-                    drop(op)
+                    collided(api, op, op.edit)
                 } else {
                     // Наш баг (забыли sha, кривой автор): ретрай не поможет. Операцию снимаем —
                     // иначе она встаёт в голову журнала навсегда и запирает всё, что за ней, а
@@ -475,13 +509,33 @@ class RepoStore(
             else -> Push.RETRY
         }
 
+    /** После потери ответа повтор создания даёт 422: проверяем, не наш ли это уже файл. */
+    private fun collided(api: GithubApi, op: WriteQueue.Op, edit: Edit.CreateTask): Push {
+        val existing = api.readFile(op.path)
+        accept(op.path, existing, resetRevision = true)
+        if (existing.text != edit.content) {
+            say("Файл ${op.path} уже есть в GitHub — задача не создана")
+        }
+        return drop(op)
+    }
+
+    /** GitHub скрывает недоступные репозитории ответом 404: это не доказательство удаления. */
+    private fun missing(api: GithubApi, op: WriteQueue.Op): Push {
+        // Создаваемого файла ещё нет по определению: 404 от PUT не снимает намерение создать.
+        if (op.edit is Edit.CreateTask) return Push.RETRY
+        val files = api.readTree(api.readRef())
+        // Только полный, успешно прочитанный снимок подтверждает отсутствие. Любой сбой
+        // проверки уходит во внешний retry в push, не теряя журнал или базу слияния.
+        return if (op.path in files) Push.RETRY else vanished(op)
+    }
+
     /**
      * Путь уехал (Action перенёс или файла уже нет): правку выбрасываем, файл не воскрешаем, а
      * карту приводим в чувство — иначе владелец продолжает видеть задачу, которой в репо нет
      * (решение LLD-8).
      */
     private fun vanished(op: WriteQueue.Op): Push {
-        forget(op.path, snapshot.commitSha)
+        forget(op.path)
         say(
             if (op.edit is Edit.DeleteFile) {
                 // Удаление 404 — это не потеря: цель владельца достигнута. Сюда же приходит
@@ -526,16 +580,23 @@ class RepoStore(
         return Push.MORE
     }
 
-    private fun accept(path: String, entry: RepoCache.Entry, commitSha: String) {
-        // Кэш обновляется из ответа записи: отдельный опрос ref не нужен (решение LLD-4).
+    private fun accept(path: String, entry: RepoCache.Entry, resetRevision: Boolean = false) {
+        // Ответ записи обновляет только этот файл, а не весь снимок. Между обновлением
+        // и PUT могли появиться чужие коммиты: их ещё нужно прочитать от прежней базы.
         val was = snapshot
-        cache.save(was.copy(commitSha = commitSha, files = was.files + (path to entry)))
+        cache.save(
+            was.copy(
+                commitSha = if (resetRevision) "" else was.commitSha,
+                etag = if (resetRevision) "" else was.etag,
+                files = was.files + (path to entry),
+            )
+        )
     }
 
     /** Пути в репо больше нет: убираем его из карты, чтобы владелец не видел призрак. */
-    private fun forget(path: String, commitSha: String) {
+    private fun forget(path: String) {
         val was = snapshot
-        cache.save(was.copy(commitSha = commitSha, files = was.files - path))
+        cache.save(was.copy(files = was.files - path))
     }
 
     private fun revision(ops: List<WriteQueue.Op>): String =

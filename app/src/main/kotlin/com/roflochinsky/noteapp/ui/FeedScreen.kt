@@ -69,6 +69,7 @@ fun FeedScreen(
     onRefresh: () -> Unit,
     onRecord: () -> Unit,
     onSettings: () -> Unit,
+    onCommunications: () -> Unit = {},
 ) {
     val pull = rememberPullToRefreshState()
     // Состояние чипов и поиска переживает поворот, но не перезапуск (решение LLD-17).
@@ -88,6 +89,12 @@ fun FeedScreen(
                 filter = filter.copy(query = text.orEmpty())
             },
         )
+        androidx.compose.material3.TextButton(
+            onClick = onCommunications,
+            modifier = Modifier.padding(horizontal = 12.dp),
+        ) {
+            Text("Коммуникации · текст и экспорт")
+        }
         NoteChips(feed, people, projects, today, filter) { filter = it }
         // Первый синк уходит на этой вкладке — отказ («нет токена», «нет доступа») виден здесь же.
         SyncLine(sync, onSettings)
@@ -168,7 +175,7 @@ private fun EmptyFeed() {
         EmptyIllustration()
         Text("Пока ни одной заметки", style = MaterialTheme.typography.titleMedium)
         Text(
-            "Зажми кнопку питания — и говори.\nОстальное случится само.",
+            "Нажмите «Записать» или добавьте текст в «Коммуникации».\nОблачная обработка включается в настройках.",
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(horizontal = 40.dp),
         )
@@ -298,7 +305,7 @@ internal fun RecordBar(isRecording: Boolean, onRecord: () -> Unit) {
             Text(if (isRecording) "Идёт запись — открыть" else "Записать")
         }
         Text(
-            "или долгое нажатие кнопки питания — даже с заблокированного экрана",
+            "Кнопка питания: после настройки роли ассистента на телефоне",
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(top = 8.dp),
         )

@@ -1,0 +1,66 @@
+head = ""
+[control]
+file = "app/src/main/kotlin/com/roflochinsky/noteapp/pipeline/CommunicationStore.kt"
+find = 'put("text", value.text)'
+replace = 'put("text", value.text.trim())'
+tests = "*CommunicationStoreTest"
+expect_fail = "CommunicationStoreTest::save survives reopen and preserves exact source"
+
+[[mutations]]
+id = "UPLOAD_RECONCILE"
+claim = "Lost GitHub acknowledgement cannot repeat PUT"
+file = "app/src/main/kotlin/com/roflochinsky/noteapp/pipeline/RawNoteUpload.kt"
+find = 'existing(api, path, content)?.let {'
+replace = 'existing(api, path, content)?.takeIf { false }?.let {'
+tests = "*RawNoteUploadTest.lost acknowledgement reconciles without repeating PUT"
+expect_fail = "RawNoteUploadTest::lost acknowledgement reconciles without repeating PUT"
+
+[[mutations]]
+id = "STT_RESTORE"
+claim = "Saved paid response is restored without a second request"
+file = "app/src/main/kotlin/com/roflochinsky/noteapp/pipeline/TranscribeWorker.kt"
+find = 'restoreTranscript(dir) -> WorkResult.success()'
+replace = 'false -> WorkResult.success()'
+tests = "*TranscribeWorkerTest.saved vendor response resumes locally without a second paid request"
+expect_fail = "TranscribeWorkerTest::saved vendor response resumes locally without a second paid request"
+
+[[mutations]]
+id = "STT_EMPTY_STOP"
+claim = "Completed empty response does not create an automatic paid loop"
+file = "app/src/main/kotlin/com/roflochinsky/noteapp/pipeline/TranscribeWorker.kt"
+find = 'EmptyTranscription.stopped(dir) -> WorkResult.failure()'
+replace = 'false -> WorkResult.failure()'
+tests = "*TranscribeWorkerTest"
+expect_fail = "TranscribeWorkerTest::пустой ответ вендора не выдаётся за расшифровку"
+
+[[mutations]]
+id = "QUEUE_ATOMIC"
+claim = "Failed queue replacement preserves older intent"
+file = "app/src/main/kotlin/com/roflochinsky/noteapp/pipeline/WriteQueue.kt"
+find = 'NotesStore.writeAtomic(File(dir, "${op.id}$EXT"), json.toString())'
+replace = 'File(dir, "${op.id}$EXT").writeText(json.toString())'
+tests = "*WriteQueueTest.failed replacement keeps previous operation intact"
+expect_fail = "WriteQueueTest::failed replacement keeps previous operation intact"
+
+[[mutations]]
+id = "EXPORT_PROJECT"
+claim = "Project export excludes unrelated private sources"
+file = "app/src/main/kotlin/com/roflochinsky/noteapp/pipeline/CommunicationExport.kt"
+find = 'sources.filter { project == null || it.project == project }.forEach { source(it) }'
+replace = 'sources.forEach { source(it) }'
+tests = "*CommunicationExportTest"
+expect_fail = "CommunicationExportTest::selected project excludes unrelated source note and task"
+
+[[mutations]]
+id = "REFRESH_CANCEL_BASE"
+claim = "An edit queued and cancelled during refresh cannot certify a stale blob"
+file = "app/src/main/kotlin/com/roflochinsky/noteapp/pipeline/RepoStore.kt"
+find = """        val bySha = was.files.values.associateBy { it.sha }
+        return { path, sha ->
+            was.files[path]?.takeIf { it.sha == sha }"""
+replace = """        val waiting = queue.pending().map { it.path }.toSet()
+        val bySha = was.files.values.associateBy { it.sha }
+        return { path, sha ->
+            was.files[path]?.takeIf { it.sha == sha || path in waiting }"""
+tests = "*RepoStoreReliabilityTest.edit queued and cancelled within refresh never certifies a stale base"
+expect_fail = "RepoStoreReliabilityTest::edit queued and cancelled within refresh never certifies a stale base"

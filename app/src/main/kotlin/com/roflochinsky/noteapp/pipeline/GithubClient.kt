@@ -47,8 +47,11 @@ class GithubClient(
         RepoDelta.parse(fetch("$API/$repo/compare/$base...$head"))
 
     override fun readTree(commitSha: String): Map<String, String> {
-        val tree =
-            JSONObject(fetch("$API/$repo/git/trees/$commitSha?recursive=1")).getJSONArray("tree")
+        val response = JSONObject(fetch("$API/$repo/git/trees/$commitSha?recursive=1"))
+        if (response.getBoolean("truncated")) {
+            throw IOException("GitHub returned a truncated repository tree")
+        }
+        val tree = response.getJSONArray("tree")
         return (0 until tree.length())
             .map { tree.getJSONObject(it) }
             .filter { it.getString("type") == "blob" }

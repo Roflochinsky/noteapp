@@ -32,11 +32,12 @@ class WriteQueue(private val dir: File) {
     @Synchronized
     fun enqueue(path: String, edit: Edit): Op {
         val now = pending()
-        if (edit is Edit.DeleteFile)
-            now.filter { it.path == path }.forEach { File(dir, "${it.id}$EXT").delete() }
         val same = now.firstOrNull { it.path == path && it.edit.target == edit.target }
         val op = Op(same?.id ?: nextId(), path, edit)
         write(op)
+        if (edit is Edit.DeleteFile)
+            now.filter { it.path == path && it.id != op.id }
+                .forEach { File(dir, "${it.id}$EXT").delete() }
         return op
     }
 
@@ -97,13 +98,7 @@ class WriteQueue(private val dir: File) {
                 .put("path", op.path)
                 .put("attempt", op.attempt)
                 .put("edit", encode(op.edit))
-        val tmp = File(dir, "${op.id}$EXT.tmp")
-        tmp.writeText(json.toString())
-        val target = File(dir, "${op.id}$EXT")
-        if (!tmp.renameTo(target)) {
-            target.writeText(tmp.readText())
-            tmp.delete()
-        }
+        NotesStore.writeAtomic(File(dir, "${op.id}$EXT"), json.toString())
     }
 
     private fun read(file: File): Op {

@@ -34,10 +34,12 @@ done
 [[ -n ${tasks+x} ]] || tasks=("${@:-}")
 [[ -n ${tasks[0]:-} ]] || tasks=(ktfmtCheck detekt testDebugUnitTest)
 
-[[ -f "$root/local.properties" ]] || cp ~/code/noteapp/local.properties "$root/local.properties"
+if [[ ! -f "$root/local.properties" && -z ${ANDROID_HOME:-} && -z ${ANDROID_SDK_ROOT:-} ]]; then
+  cp ~/code/noteapp/local.properties "$root/local.properties"
+fi
 
 exec 9>"$lock"
 flock -n 9 || { echo "gate: другой прогон уже идёт, жду очереди (это нормально, не убивай)…" >&2; flock 9; }
 
 echo "gate: ${net[*]} ${tasks[*]}"
-JAVA_HOME=~/.local/java/jdk17 "$root/gradlew" -p "$root" "${net[@]}" --max-workers=4 "${tasks[@]}"
+JAVA_HOME="${JAVA_HOME:-$HOME/.local/java/jdk17}" "$root/gradlew" -p "$root" "${net[@]}" --max-workers=4 "${tasks[@]}"

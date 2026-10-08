@@ -97,6 +97,21 @@ class EditTest {
     }
 
     @Test
+    fun `повтор добавления подзадачи идемпотентен`() {
+        val edit = Edit.AddSubtask("Тест на потерю сети")
+        val first = Edit.apply(src, edit)
+        assertEquals(first, Edit.apply(first, edit))
+    }
+
+    @Test
+    fun `добавление существующей завершённой подзадачи не снимает галочку`() {
+        assertEquals(
+            src,
+            Edit.apply(src, Edit.AddSubtask("  ВОСПРОИЗВЕСТИ  баг на длинной записи  ")),
+        )
+    }
+
+    @Test
     fun `секция подзадач заводится, если её не было`() {
         val bare = "---\ntitle: Купить переходник\nstatus: open\n---\n"
         val out = Edit.apply(bare, Edit.AddSubtask("Проверить USB-C"))

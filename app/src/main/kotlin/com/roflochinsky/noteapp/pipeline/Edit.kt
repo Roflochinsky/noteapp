@@ -46,7 +46,9 @@ sealed interface Edit {
                 is SetTitle -> "field:${TITLE}"
                 is SetStatus -> "field:${STATUS}"
                 is ToggleSubtask -> "subtask:${normalize(text)}"
-                is AddSubtask -> "subtask:${normalize(text)}"
+                // Добавление должно пережить галочку, поставленную до отправки: иначе toggle
+                // заменил бы создание строки и в репо переключать было бы нечего.
+                is AddSubtask -> "add-subtask:${normalize(text)}"
                 is CreateTask -> "create"
                 // Два разных имени — две операции; одно и то же дважды — одна.
                 is AddToRegistry -> "entry:${normalize(name)}"
@@ -147,6 +149,15 @@ sealed interface Edit {
 
         private fun add(text: String, subtask: String): String {
             val lines = text.replace("\r\n", "\n").trimEnd().split("\n").toMutableList()
+            // Повтор после потери ответа не создаёт дубль и не снимает чужую галочку.
+            val want = normalize(subtask)
+            if (
+                lines.any {
+                    CHECKBOX.find(it)?.let { m -> normalize(m.part("text")) == want } == true
+                }
+            ) {
+                return text
+            }
             val heading = lines.indexOfFirst { it.trim().equals(SUBTASKS_HEADING, true) }
             val row = "- [ ] ${subtask.trim()}"
             if (heading < 0) {

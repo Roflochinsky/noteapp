@@ -60,3 +60,15 @@ echo "sdk.dir=<путь к Android SDK>" > local.properties   # файл в giti
 
 Формат — ktfmt, статанализ — detekt + Android Lint; всё обязано быть зелёным до «готово»
 (правила для агентов — `CLAUDE.md`).
+
+## Communications preview
+
+The feature branch adds a Russian local-first communications workspace: paste/share/import UTF-8 text,
+source/project metadata and manual annotations, then deliberately export project context with cached
+notes and canonical tasks. Imported sources are not sent to GitHub or STT and are excluded from
+Android Auto Backup. Use **Сохранить .md** to keep a portable copy.
+
+See [release scope and limits](docs/releases/communications-preview-2026-10-08.md) and
+[acceptance specification](docs/specs/2026-10-08-communications-release.md). The isolated debug package
+is `com.roflochinsky.noteapp.communications`; do not uninstall prior installations to try it.
+`bin/gate` accepts your configured `JAVA_HOME` and `ANDROID_HOME` on standard Android build hosts.
